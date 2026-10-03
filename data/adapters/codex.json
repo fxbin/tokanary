@@ -1,0 +1,24 @@
+{
+  "id": "codex",
+  "label": "Codex CLI",
+  "kind": "jsonl",
+  "paths": [
+    "{home}/.codex/sessions/**/*.jsonl",
+    "{home}/.codex/archived_sessions/**/*.jsonl"
+  ],
+  "prefilter": ["\"token", "\"turn_context\"", "\"session_meta\""],
+  "driver": "codex",
+
+  "fields": {
+    "model": ["model", "model_id"],
+    "session": ["session_id", "id"],
+    "time": ["timestamp"],
+    "input": ["input_tokens"],
+    "cacheRead": ["cached_input_tokens"],
+    "cacheWrite": ["cache_write_input_tokens"],
+    "output": ["output_tokens"],
+    "reasoning": ["reasoning_output_tokens"]
+  },
+
+  "note": "input_tokens 含缓存：原始 402.6M → 真正新增输入仅 0.58M（差约 690 倍）。取数用 total_token_usage 的差分（本机实测累加 last 会多算 15%），累计值回退时改用 last。模型名来自 turn_context，会向后携带。"
+}

@@ -1,0 +1,630 @@
+/* U1:范围聚合手算对照 + 空守卫 + 真实数据一致性 + 总览冒烟。
+ * 用法: npm test (web/ 目录下)。真实数据用例需要 .cache/dashboard.json */
+import { describe, it, expect } from 'vitest'
+import {
+  computeAll, compareSources, dailyCost, defaultOpts, money,
+  rangeStats, filterDaysByRange, rangeCutoffKey, rangeAnchor,
+  filterHoursByRange, hourMatrix, rangeInsights, calcStreak, weekTopModels,
+  type RangeKey
+} from './pricing'
+import { renderOverview, renderModels, renderSessions, renderProjects, renderSettings, budgetAlertHtml, defaultUiState } from './render'
+import { heatmap, MODEL_COLORS } from './charts'
+import { CATS } from './pricing'
+import { loadDashboardFixture } from './testsupport'
+
+const DATA = loadDashboardFixture()
+const live = DATA ? describe : describe.skip
+const itLive = DATA ? it : it.skip
+
+const CLOSE = 1e-6
+const near = (a: number, b: number) => expect(Math.abs(a - b)).toBeLessThan(CLOSE)
+
+/* 手算固件:10 个连续日,total 100..1000,cost = total/100 */
+function fixture() {
+  const days = []
+  for (let i = 1; i <= 10; i++) {
+    const total = i * 100
+    days.push({
+      d: '2026-09-' + String(i).padStart(2, '0'),
+      cacheRead: total * 0.6, cacheWrite: total * 0.1, input: total * 0.2,
+      output: total * 0.1, total
+    })
+  }
+  const costByDay: Record<string, number> = {}
+  days.forEach((d) => { costByDay[d.d] = d.total / 100 })
+  return { data: { days }, costByDay }
+}
+
+describe('range aggregation', () => {
+  it('日历窗口:today 取锚日,7d 取后 7 天,30d/all 取全部', () => {
+    const { data } = fixture()
+    expect(filterDaysByRange(data.days, 'today').map((d) => d.d)).toEqual(['2026-09-10'])
+    expect(filterDaysByRange(data.days, '7d').map((d) => d.d)[0]).toBe('2026-09-04')
+    expect(filterDaysByRange(data.days, '7d')).toHaveLength(7)
+    expect(filterDaysByRange(data.days, '30d')).toHaveLength(10)
+    expect(filterDaysByRange(data.days, 'all')).toHaveLength(10)
+    expect(rangeCutoffKey([], 'today')).toBeNull()
+    expect(rangeAnchor({ days: [] })).toBeNull()
+  })
+
+  it('手算对照:tokens 精确,费用摊算求和,min/avg/max', () => {
+    const { data, costByDay } = fixture()
+    const s7 = rangeStats(data, {} as any, costByDay, '7d')
+    near(s7.tokens, 4900)
+    near(s7.cost, 49)
+    near(s7.avgCost, 7)
+    expect(s7.dayCount).toBe(7)
+    expect(s7.maxDay).toBe('2026-09-10')
+    near(s7.maxCost, 10)
+    expect(s7.minDay).toBe('2026-09-04')
+    near(s7.minCost, 4)
+    near(s7.cacheHitPct, 66.7)   // 读/(读+写+新增输入) = 0.6/0.9(分母不含输出,与旧口径同式)
+    const s1 = rangeStats(data, {} as any, costByDay, 'today')
+    near(s1.tokens, 1000)
+    near(s1.cost, 10)
+  })
+
+  it('空范围守卫:全 0 且无 NaN', () => {
+    const s = rangeStats({ days: [] }, {} as any, {}, '7d' as RangeKey)
+    expect(s.tokens).toBe(0)
+    expect(s.cost).toBe(0)
+    expect(s.avgCost).toBe(0)
+    expect(s.minDay).toBeNull()
+    expect(s.cacheHitPct).toBe(0)
+    expect(Number.isNaN(s.avgCost)).toBe(false)
+  })
+
+  itLive('真实数据:all 范围 token == 总计,费用 == 按天合计', () => {
+    const st = defaultUiState()
+    const s = computeAll(DATA, st)
+    const byDay = dailyCost(DATA, s)
+    const all = rangeStats(DATA, s, byDay, 'all')
+    expect(all.tokens).toBe(DATA.totals.total)
+    near(all.cost, Object.keys(byDay).reduce((t, k) => t + byDay[k], 0))
+    const today = rangeStats(DATA, s, byDay, 'today')
+    expect(today.dayCount).toBe(1)
+    expect(today.tokens).toBeGreaterThan(0)
+  })
+
+  itLive('总览冒烟:hero 金额一致 + 跨工具 + 无泄漏', () => {
+    const st = defaultUiState()
+    const cmp = compareSources(DATA, st)
+    const html = renderOverview(DATA, st, cmp, '7d')
+    expect(html).toContain(money(rangeStats(DATA, computeAll(DATA, st), dailyCost(DATA, computeAll(DATA, st)), '7d').cost))
+    expect(html).toContain('跨工具总览')
+    expect(html).toContain('<svg')
+    expect(html).not.toMatch(/>undefined</)
+    expect(html).not.toMatch(/NaN/)
+    expect(renderOverview(null, st, cmp, '7d')).toContain('tokanary refresh')
+  })
+})
+
+/* ---- U2: hours / heatmap / 洞察 ---- */
+
+function hourFixture() {
+  // 2026-09-01 是周二(getDay=2);造 3 个小时格
+  return {
+    hours: [
+      { h: '2026-09-01 10', total: 100 },
+      { h: '2026-09-01 10', total: 50 },   // 同格累加
+      { h: '2026-09-03 23', total: 200 },
+      { h: '2026-09-10 00', total: 300 }
+    ] as Array<{ h: string; total: number }>
+  }
+}
+
+describe('U2 hours heatmap', () => {
+  it('hourMatrix: weekday×hour 聚合,7×24,同格求和', () => {
+    const m = hourMatrix(hourFixture().hours)
+    expect(m).toHaveLength(7)
+    m.forEach((row) => expect(row).toHaveLength(24))
+    // 2026-09-01 = Tuesday → wd=2, hour 10 → 150
+    expect(m[2][10]).toBe(150)
+    // 2026-09-03 = Thursday → wd=4, hour 23 → 200
+    expect(m[4][23]).toBe(200)
+    // 2026-09-10 = Thursday → wd=4, hour 0 → 300
+    expect(m[4][0]).toBe(300)
+    const sum = m.reduce((t, r) => t + r.reduce((a, b) => a + b, 0), 0)
+    expect(sum).toBe(650) // 100+50+200+300
+  })
+
+  it('filterHoursByRange: 按日期裁剪到 range 窗口', () => {
+    const hours = hourFixture().hours
+    const anchor = '2026-09-10'
+    expect(filterHoursByRange(hours, 'today', anchor)).toHaveLength(1)
+    const w7 = filterHoursByRange(hours, '7d', anchor)
+    expect(w7.every((x) => x.h.slice(0, 10) >= '2026-09-04' && x.h.slice(0, 10) <= '2026-09-10')).toBe(true)
+    expect(w7).toHaveLength(1) // 只有 09-10 落在窗口
+    expect(filterHoursByRange(hours, 'all')).toHaveLength(4)
+    expect(filterHoursByRange([], '7d')).toEqual([])
+  })
+
+  it('heatmap: 有数据出 SVG;全 0/空出降级文案', () => {
+    const m = hourMatrix(hourFixture().hours)
+    const html = heatmap(m)
+    expect(html).toContain('<svg')
+    expect(html).toContain('heatmap')
+    expect(html).toContain('活跃小时格')
+    const empty = heatmap([])
+    expect(empty).toContain('tokanary refresh')
+    const zero = heatmap(new Array(7).fill(null).map(() => new Array(24).fill(0)))
+    expect(zero).toContain('tokanary refresh')
+  })
+
+  it('rangeInsights: 手算对照 + 空守卫', () => {
+    const { data, costByDay } = fixture()
+    const s = computeAll(data as any, defaultOpts())
+    // fixture 里 unit 未定义(无 models),最贵日仍应按 costByDay 算出
+    const ins = rangeInsights({ ...data, dayModel: [] } as any, s, costByDay, '7d')
+    expect(ins.peakDay).toBe('2026-09-10')
+    near(ins.peakDayCost, 10)
+    near(ins.avgBurn, 7)
+    near(ins.forecast30, 210) // 7×30
+    expect(ins.dayCount).toBe(7)
+    near(ins.cacheHitPct, 66.7)
+
+    const empty = rangeInsights({ days: [] } as any, {} as any, {}, '7d')
+    expect(empty.peakDay).toBeNull()
+    near(empty.avgBurn, 0)
+    near(empty.forecast30, 0)
+    expect(Number.isNaN(empty.avgBurn)).toBe(false)
+  })
+
+  itLive('真实 data.js: hours 求和 ≈ days(total);总览含 heatmap+洞察', () => {
+    if (Array.isArray(DATA.hours) && DATA.hours.length) {
+      const hs = DATA.hours.reduce((t: number, x: any) => t + (x.total || 0), 0)
+      const ds = (DATA.days || []).reduce((t: number, x: any) => t + (x.total || 0), 0)
+      // warehouse 侧 hours 只计有 h 的轮;允许极小相对差(<0.1%)
+      expect(Math.abs(hs - ds) / Math.max(ds, 1)).toBeLessThan(0.001)
+    }
+    const st = defaultUiState()
+    const cmp = compareSources(DATA, st)
+    const html = renderOverview(DATA, st, cmp, 'all')
+    expect(html).toContain('活动热力图')
+    expect(html).toContain('洞察')
+    expect(html).toContain('月末预测')
+    expect(html).not.toMatch(/NaN/)
+    // 无 hours 的降级
+    const noH = { ...DATA, hours: undefined }
+    const html2 = renderOverview(noH, st, cmp, 'all')
+    expect(html2).toContain('tokanary refresh')
+  })
+})
+
+/* ---- U3: 模型视图(稳定色/donut/堆叠) + 会话视图(搜索/排序/burn) ---- */
+
+describe('U3 models tab', () => {
+  itLive('冒烟:堆叠 + donut + 改价 input + 范围内列,无 NaN', () => {
+    const st = defaultUiState()
+    const cmp = compareSources(DATA, st)
+    const html = renderModels(DATA, st, cmp, '7d')
+    expect(html).toContain('模型 Token 构成')
+    expect(html).toContain('模型费用占比')
+    expect(html).toContain('模型明细与单价')
+    expect(html).toContain('data-field=')
+    expect(html).toContain('data-key=')
+    expect(html).toContain('<svg')
+    expect(html).toContain('范围内 Token')
+    expect(html).not.toMatch(/NaN/)
+    expect(html).not.toMatch(/>undefined</)
+  })
+
+  itLive('稳定色:同一 key 字典序索引跨渲染一致;donut 含模型色', () => {
+    const st = defaultUiState()
+    const cmp = compareSources(DATA, st)
+    const a = renderModels(DATA, st, cmp, 'all')
+    const b = renderModels(DATA, st, cmp, 'all')
+    expect(a).toBe(b)
+    // Ember Instrument 六色单源:渲染必须出现 palette 首色(s4e1 终裁,同 PR 迁测)
+    expect(a).toContain(MODEL_COLORS[0])
+  })
+
+  it('色板契约:MODEL_COLORS 恰 6 色且 CATS 四段 = 前 4 色(单源,禁第七色)', () => {
+    expect(MODEL_COLORS).toHaveLength(6)
+    expect(new Set(MODEL_COLORS).size).toBe(6)
+    CATS.forEach((c, i) => {
+      expect(c.color).toBe(MODEL_COLORS[i])
+    })
+  })
+
+  itLive('空范围:无范围内用量降级文案,不崩', () => {
+    const st = defaultUiState()
+    const cmp = compareSources(DATA, st)
+    const emptyData = { ...DATA, days: [], dayModel: [] }
+    const html = renderModels(emptyData, st, cmp, '7d')
+    expect(html).toContain('没有模型用量')
+    expect(html).not.toMatch(/NaN/)
+    expect(renderModels(null, st, cmp, '7d')).toContain('tokanary refresh')
+  })
+
+  itLive('sortKey 控制明细排序:按 cost 降序时首行费用 ≥ 末行', () => {
+    const st = defaultUiState()
+    st.sortKey = 'cost'
+    st.sortDir = -1
+    const cmp = compareSources(DATA, st)
+    const html = renderModels(DATA, st, cmp, 'all')
+    // 仅结构冒烟:明细表仍渲染行
+    expect(html).toContain('<tbody>')
+  })
+
+  itLive('无价格的模型行染 row-miss', () => {
+    // row-miss is driven by a missing PRICE, not by missing usage records -
+    // the old assertion here conflated the two and only passed while some
+    // model happened to be unpriced. Build the case explicitly instead of
+    // depending on whatever the current data.js happens to contain.
+    const bare: any = JSON.parse(JSON.stringify(DATA))
+    bare.pricing = {}
+    bare.gateway = null
+    const st2 = defaultUiState()
+    const html = renderModels(bare, st2, compareSources(bare, st2), 'all')
+    expect(html).toContain('<tbody>')
+    expect(html).toContain('row-miss')
+  })
+})
+
+describe('U3 sessions tab', () => {
+  itLive('冒烟:表格 + 搜索框 + burn 列 + recency,无 NaN', () => {
+    const st = defaultUiState()
+    const cmp = compareSources(DATA, st)
+    const html = renderSessions(DATA, st, cmp, 'all')
+    expect(html).toContain('id="ses-search"')
+    expect(html).toContain('data-ses-sort=')
+    expect(html).toContain('Burn')
+    expect(html).toContain('Recency')
+    expect(html).not.toMatch(/NaN/)
+    expect(html).not.toMatch(/>undefined</)
+    expect(renderSessions(null, st, cmp, '7d')).toContain('tokanary refresh')
+  })
+
+  itLive('搜索过滤:匹配 title/project/model/id,大小写不敏感', () => {
+    const st = defaultUiState()
+    const cmp = compareSources(DATA, st)
+    const all = renderSessions(DATA, st, cmp, 'all')
+    const nAll = (all.match(/data-ses-sort/g) || []).length // 表头一次
+    st.sesQuery = '__no_such_session_zzz__'
+    const miss = renderSessions(DATA, st, cmp, 'all')
+    expect(miss).toContain('没有匹配')
+    expect(miss).not.toContain('data-ses-sort=') // 无行
+    void nAll
+
+    // 用真实会话的 title 片段
+    const sess = (DATA.sessions || [])[0]
+    if (sess && sess.title) {
+      st.sesQuery = String(sess.title).slice(0, 6)
+      const hit = renderSessions(DATA, st, cmp, 'all')
+      expect(hit).toContain('data-ses-sort=')
+      st.sesQuery = ''
+    }
+  })
+
+  itLive('排序方向:updatedAt desc 切换为 asc 后箭头翻转', () => {
+    const st = defaultUiState()
+    const cmp = compareSources(DATA, st)
+    st.sesSortKey = 'updatedAt'
+    st.sesSortDir = -1
+    const desc = renderSessions(DATA, st, cmp, 'all')
+    expect(desc).toContain('▾')
+    st.sesSortDir = 1
+    const asc = renderSessions(DATA, st, cmp, 'all')
+    expect(asc).toContain('▴')
+  })
+
+  itLive('burn ≥ 0:范围内每行 tok/天 与 $/天 非负', () => {
+    const st = defaultUiState()
+    const cmp = compareSources(DATA, st)
+    const html = renderSessions(DATA, st, cmp, 'all')
+    // burn 列若渲染数字,不应出现负号前缀的 burn(简单:无 "-N" 紧跟 burn 单元)
+    expect(html).not.toMatch(/>-\d/)
+    // 空范围
+    const empty = renderSessions({ ...DATA, sessions: [] }, st, cmp, '7d')
+    expect(empty).toContain('没有会话')
+  })
+
+  itLive('范围过滤:today 窗口会话数 ≤ all', () => {
+    const st = defaultUiState()
+    const cmp = compareSources(DATA, st)
+    const all = renderSessions(DATA, st, cmp, 'all')
+    const today = renderSessions(DATA, st, cmp, 'today')
+    const cnt = (h: string) => (h.match(/<tr>/g) || []).length
+    expect(cnt(today)).toBeLessThanOrEqual(cnt(all))
+    expect(today).not.toMatch(/NaN/)
+  })
+})
+
+/* ---- U4: 项目钻取 + 设置 + 预算 ---- */
+
+describe('U4 projects tab', () => {
+  itLive('冒烟:归因条 + data-proj 行 + 无 NaN;null data 守卫', () => {
+    const st = defaultUiState()
+    const cmp = compareSources(DATA, st)
+    const html = renderProjects(DATA, st, cmp, 'all')
+    expect(html).toContain('项目归因')
+    expect(html).toMatch(/data-proj="/)
+    expect(html).toContain('<svg')
+    expect(html).not.toMatch(/NaN/)
+    expect(html).not.toMatch(/>undefined</)
+    expect(renderProjects(null, st, cmp, '7d')).toContain('tokanary refresh')
+  })
+
+  itLive('钻取:选项目出面板(模型/日趋势/会话) + 返回按钮', () => {
+    const st = defaultUiState()
+    const cmp = compareSources(DATA, st)
+    const name = (DATA.projects || []).map((p: any) => p.name).find((n: string) => n) || '(无项目)'
+    st.drillProject = name
+    const html = renderProjects(DATA, st, cmp, 'all')
+    expect(html).toContain('项目钻取')
+    expect(html).toContain('该项目模型构成')
+    expect(html).toContain('该项目日趋势')
+    expect(html).toContain('该项目会话')
+    expect(html).toContain('id="drill-back"')
+    expect(html).not.toMatch(/NaN/)
+    st.drillProject = null
+    const back = renderProjects(DATA, st, cmp, 'all')
+    expect(back).not.toContain('id="drill-back"')
+  })
+
+  itLive('空范围:无项目用量降级文案', () => {
+    const st = defaultUiState()
+    const cmp = compareSources(DATA, st)
+    const html = renderProjects({ ...DATA, projects: [], sessionsAll: [], sessions: [] }, st, cmp, '7d')
+    expect(html).toContain('没有项目用量')
+    expect(html).not.toMatch(/NaN/)
+  })
+})
+
+describe('U4 settings tab + budget', () => {
+  itLive('冒烟:预算行/口径 radio/策略 select/自定义源/导入导出/网关表', () => {
+    const st = defaultUiState()
+    const cmp = compareSources(DATA, st)
+    const html = renderSettings(DATA, st, cmp, '7d', '')
+    expect(html).toContain('预算告警')
+    expect(html).toContain('id="budget-usd"')
+    expect(html).toContain('name="psrc"')
+    expect(html).toContain('id="policy"')
+    expect(html).toContain('id="custom-url"')
+    expect(html).toContain('id="btn-export"')
+    expect(html).toContain('id="btn-import"')
+    expect(html).toContain('id="io"')
+    if ((DATA.gateway || {}).models?.length) expect(html).toContain('网关价目表')
+    expect(html).not.toMatch(/NaN/)
+    expect(renderSettings(null, st, cmp, '7d', '')).toContain('tokanary refresh')
+  })
+
+  it('预算分级:0 关闭无条;50/80/95 分级;cost≤budget 安全', () => {
+    expect(budgetAlertHtml(10, 0)).toBe('')
+    expect(budgetAlertHtml(10, -1)).toBe('')
+    const mid = budgetAlertHtml(60, 100)
+    expect(mid).toContain('预算过半')
+    expect(mid).toContain('budget-warn')
+    const high = budgetAlertHtml(85, 100)
+    expect(high).toContain('预算告警')
+    expect(high).toContain('budget-err')
+    const crit = budgetAlertHtml(96, 100)
+    expect(crit).toContain('budget-err')
+    const safe = budgetAlertHtml(10, 100)
+    expect(safe).toContain('预算进度')
+    expect(safe).toContain('budget-ok')
+  })
+
+  itLive('budgetUsd 进 settings 展示占用%;st 默认 0', () => {
+    const st = defaultUiState()
+    expect(st.budgetUsd).toBe(0)
+    expect(st.drillProject).toBeNull()
+    const cmp = compareSources(DATA, st)
+    st.budgetUsd = 1
+    const html = renderSettings(DATA, st, cmp, 'all', '')
+    expect(html).toContain('占预算')
+    expect(html).not.toMatch(/NaN/)
+  })
+
+  itLive('data.js 含 sessionsAll(增量契约,U4 钻取依赖)', () => {
+    expect(Array.isArray(DATA.sessionsAll)).toBe(true)
+    expect(DATA.sessionsAll.length).toBeGreaterThanOrEqual((DATA.sessions || []).length)
+  })
+})
+
+/* ---- U6: streak + 本周 Top 模型 ---- */
+
+/* ---- U7 修复:跨工具 stackBar 越界 + 外部 days 缺 total ---- */
+
+describe('stackBar overflow guard', () => {
+  it('total=0 但分段>0:条不超出 viewBox(rect x+width ≤ 900)', async () => {
+    const { stackBar } = await import('./charts')
+    const html = stackBar([
+      {
+        label: 'tool', total: 0, totalText: '0',
+        segments: [
+          { v: 44458565, color: MODEL_COLORS[0], name: 'cacheRead' },
+          { v: 9926652, color: MODEL_COLORS[1], name: 'cacheWrite' },
+          { v: 132704, color: MODEL_COLORS[2], name: 'input' },
+          { v: 553984, color: MODEL_COLORS[3], name: 'output' }
+        ]
+      },
+      { label: 'empty', total: 0, totalText: '0', segments: [] }
+    ], { labelW: 132 })
+    const rectRe = /<rect x="([0-9.]+)" y="[0-9.]+" width="([0-9.]+)"/g
+    let m: RegExpExecArray | null
+    let over = false
+    while ((m = rectRe.exec(html))) {
+      const end = Number(m[1]) + Number(m[2])
+      if (!isFinite(end) || end > 900) over = true
+    }
+    expect(over).toBe(false)
+    expect(html).toContain('<svg')
+  })
+
+  it('sumDayFields:外部 day 缺 total → 四段之和;有 total 用 total', async () => {
+    const { sumDayFields } = await import('./pricing')
+    const noTot = sumDayFields([{ cacheRead: 10, cacheWrite: 5, input: 3, output: 2 }])
+    expect(noTot.total).toBe(20)
+    expect(noTot.cacheRead).toBe(10)
+    const withTot = sumDayFields([{ cacheRead: 10, cacheWrite: 5, input: 3, output: 2, total: 99 }])
+    expect(withTot.total).toBe(99)
+    const zeroTot = sumDayFields([{ cacheRead: 7, cacheWrite: 0, input: 0, output: 0, total: 0 }])
+    expect(zeroTot.total).toBe(7) // total=0 视为缺失,分段兜底
+  })
+
+  itLive('真实 data:renderOverview 7d 跨工具条无 rect 溢出 900', () => {
+    const st = defaultUiState()
+    const cmp = compareSources(DATA, st)
+    const html = renderOverview(DATA, st, cmp, '7d')
+    const i = html.indexOf('跨工具总览')
+    expect(i).toBeGreaterThanOrEqual(0)
+    const section = html.slice(i, html.indexOf('</section>', i))
+    const rectRe = /<rect x="([0-9.]+)" y="[0-9.]+" width="([0-9.]+)"/g
+    let m: RegExpExecArray | null
+    let maxEnd = 0
+    while ((m = rectRe.exec(section))) {
+      maxEnd = Math.max(maxEnd, Number(m[1]) + Number(m[2]))
+    }
+    expect(maxEnd).toBeGreaterThan(0)
+    expect(maxEnd).toBeLessThanOrEqual(900)
+    expect(html).not.toMatch(/NaN/)
+  })
+})
+
+describe('U6 streak', () => {
+  const active = (keys: string[]) => keys.map((d) => ({ d, total: 100 }))
+
+  it('连续活跃:10 天全连续 → streak=10,endDate=末日', () => {
+    const days = []
+    for (let i = 1; i <= 10; i++) days.push({ d: '2026-09-' + String(i).padStart(2, '0'), total: 50 })
+    const s = calcStreak(days, '2026-09-10')
+    expect(s.streak).toBe(10)
+    expect(s.endDate).toBe('2026-09-10')
+  })
+
+  it('断档:09-10 无数据则从 09-09 起算,断点前不计', () => {
+    const days = active(['2026-09-08', '2026-09-09', '2026-09-10'])
+    // 09-07 断,09-10 活跃 → 3
+    expect(calcStreak(days, '2026-09-10').streak).toBe(3)
+    // anchor=09-11(无数据) → 从前一天 09-10 起仍 3
+    expect(calcStreak(days, '2026-09-11').streak).toBe(3)
+    // 中间挖洞:08,09 有,10 无,anchor=10 → 从 09 起 2
+    const hole = active(['2026-09-08', '2026-09-09'])
+    expect(calcStreak(hole, '2026-09-10').streak).toBe(2)
+    expect(calcStreak(hole, '2026-09-10').endDate).toBe('2026-09-09')
+  })
+
+  it('anchor 无数据且前一天也无 → 0;空 days → 0,null', () => {
+    const days = active(['2026-09-01'])
+    expect(calcStreak(days, '2026-09-20').streak).toBe(0)
+    expect(calcStreak([], '2026-09-10')).toEqual({ streak: 0, endDate: null })
+    expect(calcStreak([{ d: '2026-09-01', total: 0 }], '2026-09-01').streak).toBe(0)
+  })
+
+  itLive('真实 data.js: streak ≥1(有活跃日)且 endDate 非空', () => {
+    const a = rangeAnchor(DATA)
+    const s = calcStreak(DATA.days || [], a)
+    expect(s.streak).toBeGreaterThanOrEqual(1)
+    expect(s.endDate).toBeTruthy()
+  })
+})
+
+describe('U6 week top models', () => {
+  it('ISO 周窗口:周一~锚日;排序 cost 降序;Top5 截断', () => {
+    // 2026-09-16 是周三 → 该周 09-14(一)~09-16
+    const data: any = {
+      days: [{ d: '2026-09-16', total: 1 }],
+      dayModel: [
+        { d: '2026-09-13', key: 'prev-week', total: 999 }, // 上周,应排除
+        { d: '2026-09-14', key: 'm-a', total: 100 },
+        { d: '2026-09-15', key: 'm-b', total: 500 },
+        { d: '2026-09-16', key: 'm-a', total: 50 },
+        { d: '2026-09-16', key: 'm-c', total: 10 },
+        { d: '2026-09-17', key: 'future', total: 1 } // 锚日之后,排除
+      ]
+    }
+    const summary: any = { rows: [
+      { m: { key: 'm-a' }, unit: 10 },  // $/M
+      { m: { key: 'm-b' }, unit: 2 },
+      { m: { key: 'm-c' }, unit: 100 },
+      { m: { key: 'prev-week' }, unit: 999 },
+      { m: { key: 'future' }, unit: 999 }
+    ] }
+    const top = weekTopModels(data, summary, '2026-09-16')
+    const keys = top.map((r) => r.key)
+    expect(keys).not.toContain('prev-week')
+    expect(keys).not.toContain('future')
+    // cost: m-a = 150×10/1e6 = 0.0015 > m-b = 500×2/1e6 = 0.001 → m-a 在前
+    expect(keys.indexOf('m-a')).toBeLessThan(keys.indexOf('m-b'))
+    expect(keys.indexOf('m-a')).toBe(0)
+    // cost: m-a = (100+50)*10/1e6=0.0015; m-b=500*2/1e6=0.001; m-c=10*100/1e6=0.001
+    const ma = top.find((r) => r.key === 'm-a')!
+    near(ma.token, 150)
+    near(ma.cost, 0.0015)
+    expect(top.length).toBeLessThanOrEqual(5)
+    expect(top.length).toBeGreaterThanOrEqual(3)
+    const tot = top.reduce((s, r) => s + r.cost, 0)
+    expect(ma.share).toBeGreaterThan(0)
+    near(top.reduce((s, r) => s + r.share, 0), 100)
+    void tot
+  })
+
+  itLive('无 dayModel / 空 anchor → [];真实 data 有输出且无 NaN', () => {
+    expect(weekTopModels({ days: [{ d: '2026-09-16', total: 1 }], dayModel: [] }, { rows: [] }, '2026-09-16')).toEqual([])
+    expect(weekTopModels({ dayModel: [{ d: '2026-09-16', key: 'x', total: 1 }] }, { rows: [] }, null)).toEqual([])
+    expect(weekTopModels(DATA, computeAll(DATA, defaultUiState()))).toBeInstanceOf(Array)
+    const top = weekTopModels(DATA, computeAll(DATA, defaultUiState()))
+    top.forEach((r) => {
+      expect(Number.isNaN(r.cost)).toBe(false)
+      expect(r.key).toBeTruthy()
+    })
+  })
+
+  itLive('总览冒烟:含 streak KPI 与 本周 Top;空 dayModel 降级;无 NaN', () => {
+    const st = defaultUiState()
+    const cmp = compareSources(DATA, st)
+    const html = renderOverview(DATA, st, cmp, 'all')
+    expect(html).toContain('连续活跃')
+    expect(html).toContain('本周 Top 模型')
+    expect(html).toMatch(/\d+ 天|—/)
+    expect(html).not.toMatch(/NaN/)
+    expect(html).not.toMatch(/>undefined</)
+    // 空 dayModel → 降级
+    const noDm = { ...DATA, dayModel: [], days: [] }
+    const html2 = renderOverview(noDm, st, cmp, 'all')
+    expect(html2).toContain('本周暂无数据')
+    expect(html2).toContain('连续活跃')
+    // streak=0 显示 —
+    expect(html2).toContain('>—<')
+    expect(html2).not.toMatch(/NaN/)
+  })
+})
+
+/* ---- 切片二:Ember Instrument 玻璃契约(App.vue CSS 静态断言) ---- */
+import { readFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
+import { dirname, resolve } from 'node:path'
+
+describe('glass contract (slice2)', () => {
+  const css = readFileSync(resolve(dirname(fileURLToPath(import.meta.url)), './App.vue'), 'utf8')
+
+  it('backdrop-filter 同屏 ≤3 且必须存在(液态玻璃硬约束);数据面禁 blur', () => {
+    const blurs = css.match(/(^|[^-\w])backdrop-filter:\s*blur/g) || []
+    expect(blurs.length).toBeGreaterThan(0)   // 玻璃必须有
+    expect(blurs.length).toBeLessThanOrEqual(3)
+    // 数据面/数字面永不玻璃化(s1e4/s4e1)
+    expect(css).not.toMatch(/\.kpi\s*\{[^}]*backdrop-filter/)
+    expect(css).not.toMatch(/table\.tbl[^{]*\{[^}]*backdrop-filter/)
+    expect(css).not.toMatch(/\.empty\s*\{[^}]*backdrop-filter/)
+  })
+
+  it('prefers-reduced-transparency 块:关闭全部 backdrop 并回落实心(--glass 落 solid)', () => {
+    const m = css.match(/@media \(prefers-reduced-transparency: reduce\) \{([\s\S]*?)\n\}/)
+    expect(m).toBeTruthy()
+    const block = (m as RegExpMatchArray)[1]
+    expect(block).toContain('backdrop-filter: none')
+    expect(block).not.toMatch(/blur\(/)          // 降级态必无 backdrop blur
+    expect(block).toContain('background: var(--bg)')   // header 实心 fallback
+    expect(block).toContain('background: var(--card)') // 空态实心 fallback
+  })
+
+  it('空态为 opacity 级玻璃(wash token,无 blur);color-mix 洗色已收缩(改版前 53)', () => {
+    expect(css).toMatch(/\.empty \{[^}]*background: var\(--wash-1\)/)
+    const n = (css.match(/color-mix\(/g) || []).length
+    expect(n).toBeLessThanOrEqual(36)
+    // 中性 fg 洗色必须全部 token 化(禁新增内联 color-mix fg)
+    expect(css).not.toMatch(/color-mix\(in srgb, var\(--fg\)/)
+  })
+})

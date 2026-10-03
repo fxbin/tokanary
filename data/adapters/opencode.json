@@ -1,0 +1,26 @@
+{
+  "id": "opencode",
+  "label": "OpenCode",
+  "kind": "sqlite",
+  "db": "{home}/.local/share/opencode/opencode.db",
+  "query": "select id, session_id, time_created, data from message order by time_created",
+  "json_column": "data",
+
+  "where": { "role": "assistant" },
+  "require": ["tokens"],
+  "dedup": ["id"],
+
+  "fields": {
+    "model": ["modelID", "model.modelID"],
+    "session": ["session_id"],
+    "time": ["time_created"],
+    "input": ["tokens.input"],
+    "cacheRead": ["tokens.cache.read"],
+    "cacheWrite": ["tokens.cache.write"],
+    "output": ["tokens.output"],
+    "reasoning": ["tokens.reasoning"]
+  },
+  "outputAdd": ["tokens.reasoning"],
+
+  "note": "按 message 主键取数（一条 assistant 消息一次调用）。opencode 的 reasoning 是**可加**的（total = input + output + reasoning + cache.read + cache.write，本机 169 条验证过），所以用 outputAdd 并进 output 计费。"
+}

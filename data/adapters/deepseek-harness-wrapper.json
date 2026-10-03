@@ -1,0 +1,45 @@
+{
+  "id": "deepseek-harness-wrapper",
+  "label": "DeepSeek Harness（DSH Desktop）",
+  "kind": "zstd-jsonl",
+  "paths": [
+    "%APPDATA%/dsh-desktop/harness/sessions/**/*.jsonl.zstd",
+    "%APPDATA%/dsh-desktop/harness/sessions/**/*.jsonl",
+    "{home}/.dsh-desktop/sessions/**/*.jsonl.zstd",
+    "{home}/.dsh-desktop/sessions/**/*.jsonl",
+    "%APPDATA%/DSH Desktop/sessions/**/*.jsonl.zstd",
+    "%APPDATA%/DSH Desktop/sessions/**/*.jsonl",
+    "%APPDATA%/DSH Desktop/harness/sessions/**/*.jsonl.zstd",
+    "%APPDATA%/DSH Desktop/harness/sessions/**/*.jsonl",
+    "%APPDATA%/DeepSeek Harness/dsh/sessions/**/*.jsonl.zstd",
+    "%APPDATA%/DeepSeek Harness/dsh/sessions/**/*.jsonl",
+    "%APPDATA%/DeepSeekGUI/dsh/sessions/**/*.jsonl.zstd",
+    "%APPDATA%/DeepSeekGUI/dsh/sessions/**/*.jsonl",
+    "%APPDATA%/DSH/sessions/**/*.jsonl.zstd",
+    "%APPDATA%/DSH/sessions/**/*.jsonl"
+  ],
+  "prefilter": "\"usage\"",
+
+  "where": { "type": "assistant/message" },
+  "require": ["data.usage"],
+  "dedup": ["data.message.id"],
+
+  "fields": {
+    "model": [
+      "data.message.source.model",
+      "data.message.source.replayState.response.model",
+      "data.request.model",
+      "data.request.context.model",
+      "data.request.header.model"
+    ],
+    "session": ["$dir"],
+    "time": ["time"],
+    "input": ["data.usage.inputTokens"],
+    "cacheRead": ["data.usage.cacheReadTokens"],
+    "cacheWrite": ["data.usage.cacheWriteTokens"],
+    "output": ["data.usage.outputTokens"],
+    "reasoning": []
+  },
+
+  "note": "第三方包装壳（DSH Desktop 等 Electron/Tauri 壳）：私有 DSH_HOME，日志 schema 仍是官方 session.vN.jsonl[.zstd]。本机 dataelement 布局为 %APPDATA%\\dsh-desktop\\harness\\sessions。口径与原生一致：inputTokens 已非缓存、time ms→ISO、按 data.message.id 去重。"
+}

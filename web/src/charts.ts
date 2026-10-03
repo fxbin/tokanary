@@ -1,0 +1,211 @@
+/* SVG/图例构造器 —— 与仓根 app.js 同名函数逐行对齐的 TS 移植(Slice3b)。
+ * 纯字符串构造,无 DOM 依赖,方便单测。 */
+import { esc, fmt, money, pct, CATS } from './pricing'
+import { MODEL_COLORS as PALETTE6 } from './palette'
+
+/* 单源:字面量在 palette.ts;render.ts 等仍 from './charts' 取用,调用面不变 */
+export const MODEL_COLORS = PALETTE6
+
+export interface StackSeg { v: number; color: string; name: string }
+export interface StackItem {
+  label: string; sub?: string; total: number; totalText: string; segments: StackSeg[]
+}
+
+export function trimNum(v: number): string {
+  const n = Number(v)
+  if (!isFinite(n)) return ''
+  const a = Math.abs(n)
+  const dec = a >= 100 ? 2 : a >= 1 ? 3 : a >= 0.01 ? 4 : 6   // 小单价保留更多位
+  return String(Number(n.toFixed(dec)))
+}
+
+export function dateShort(ts: number): string {
+  const d = new Date(ts)
+  return (d.getMonth() + 1) + '/' + d.getDate()
+}
+
+export function stackBar(items: StackItem[], opts: { rowH?: number; labelW?: number; rightW?: number } = {}): string {
+  // items: [{label, sub, segments:[{v,color,name}], totalText}]
+  const rowH = opts.rowH || 34, gap = 10, labelW = opts.labelW || 190, rightW = opts.rightW || 84
+  const w = 900, plotW = w - labelW - rightW
+  const h = items.length * (rowH + gap) + 14
+  const segSumOf = function (it: StackItem): number {
+    return it.segments.reduce(function (t, s) { return t + Math.max(0, s.v) }, 0)
+  }
+  // 条长按 max(total, 分段和) 归一:外部 days 缺 total 时分段和兜底,避免 total=0 却画出巨条
+  const scaleOf = function (it: StackItem): number {
+    return Math.max(it.total || 0, segSumOf(it))
+  }
+  const max = Math.max.apply(null, items.map(scaleOf)) || 1
+  const out = ['<svg viewBox="0 0 ' + w + ' ' + h + '" class="chart" preserveAspectRatio="xMidYMid meet">']
+  items.forEach(function (it, idx) {
+    const y = idx * (rowH + gap) + 6
+    const scale = scaleOf(it)
+    const bw = Math.max(2, scale / max * plotW)
+    out.push('<text x="0" y="' + (y + 13) + '" class="lbl">' + esc(it.label) + '</text>')
+    if (it.sub) out.push('<text x="0" y="' + (y + 28) + '" class="lbl-sub">' + esc(it.sub) + '</text>')
+    let x = labelW
+    const segs = it.segments.filter(function (s) { return s.v > 0 })
+    if (!segs.length) {
+      out.push('<rect x="' + labelW + '" y="' + y + '" width="2" height="' + (rowH - 8) + '" fill="var(--dim)" opacity=".4"/>')
+    }
+    const denom = scale || 1
+    segs.forEach(function (s) {
+      const sw = (Math.max(0, s.v) / denom) * bw
+      out.push('<rect x="' + x.toFixed(2) + '" y="' + y + '" width="' + Math.max(0.8, sw).toFixed(2) +
+        '" height="' + (rowH - 8) + '" fill="' + s.color + '"><title>' + esc(s.name) + ': ' + fmt(s.v) +
+        ' (' + pct(s.v / denom * 100) + ')</title></rect>')
+      x += sw
+    })
+    out.push('<text x="' + (w - 2) + '" y="' + (y + 18) + '" class="val" text-anchor="end">' + esc(it.totalText) + '</text>')
+  })
+  out.push('</svg>')
+  return out.join('')
+}
+
+export function arcPath(cx: number, cy: number, R: number, r: number, a0: number, a1: number): string {
+  const large = (a1 - a0) > Math.PI ? 1 : 0
+  const x0 = cx + R * Math.cos(a0), y0 = cy + R * Math.sin(a0)
+  const x1 = cx + R * Math.cos(a1), y1 = cy + R * Math.sin(a1)
+  const x2 = cx + r * Math.cos(a1), y2 = cy + r * Math.sin(a1)
+  const x3 = cx + r * Math.cos(a0), y3 = cy + r * Math.sin(a0)
+  return 'M' + x0.toFixed(2) + ' ' + y0.toFixed(2) +
+    ' A' + R + ' ' + R + ' 0 ' + large + ' 1 ' + x1.toFixed(2) + ' ' + y1.toFixed(2) +
+    ' L' + x2.toFixed(2) + ' ' + y2.toFixed(2) +
+    ' A' + r + ' ' + r + ' 0 ' + large + ' 0 ' + x3.toFixed(2) + ' ' + y3.toFixed(2) + ' Z'
+}
+
+export interface DonutItem { label: string; value: number; color: string }
+
+export function donut(items: DonutItem[], opts: { size?: number } = {}): string {
+  const size = opts.size || 230, R = size / 2 - 4, r = R * 0.6, cx = size / 2, cy = size / 2
+  const total = items.reduce(function (s, i) { return s + i.value }, 0)
+  if (!(total > 0)) {
+    return '<div class="empty">没有可用价格，无法计算金额。<br>请在下方「模型明细」里为模型填写单价，或检查 models.dev 价格文件。</div>'
+  }
+  const out = ['<svg viewBox="0 0 ' + size + ' ' + size + '" class="donut">']
+  let a0 = -Math.PI / 2
+  items.forEach(function (it) {
+    const frac = it.value / total
+    if (frac <= 0) return
+    if (frac > 0.9999) {
+      out.push('<circle cx="' + cx + '" cy="' + cy + '" r="' + ((R + r) / 2).toFixed(2) + '" fill="none" stroke="' +
+        it.color + '" stroke-width="' + (R - r).toFixed(2) + '"><title>' + esc(it.label) + ' ' + money(it.value) + '</title></circle>')
+      return
+    }
+    const a1 = a0 + frac * Math.PI * 2
+    out.push('<path d="' + arcPath(cx, cy, R, r, a0, a1) + '" fill="' + it.color + '"><title>' +
+      esc(it.label) + ': ' + money(it.value) + ' (' + pct(frac * 100) + ')</title></path>')
+    a0 = a1
+  })
+  out.push('<text x="' + cx + '" y="' + (cy - 2) + '" text-anchor="middle" class="donut-num">' + money(total) + '</text>')
+  out.push('<text x="' + cx + '" y="' + (cy + 16) + '" text-anchor="middle" class="donut-cap">合计估算</text>')
+  out.push('</svg>')
+  return out.join('')
+}
+
+export interface LegendItem { label: string; color: string; value?: number; valueText?: string }
+
+export function legend(items: LegendItem[]): string {
+  return '<div class="legend">' + items.map(function (i) {
+    return '<span class="lg"><i style="background:' + i.color + '"></i>' +
+      esc(i.label) + (i.value !== undefined ? ' <b>' + esc(i.valueText !== undefined ? i.valueText : fmt(i.value)) + '</b>' : '') + '</span>'
+  }).join('') + '</div>'
+}
+
+export interface DayRow {
+  d: string; total: number; cacheRead: number; cacheWrite: number; input: number; output: number
+}
+
+export function dayChart(days: DayRow[], costByDay: Record<string, number>): string {
+  const w = 940, h = 260, padL = 58, padR = 58, padT = 16, padB = 34
+  const plotW = w - padL - padR, plotH = h - padT - padB
+  if (!days.length) return '<div class="empty">无数据</div>'
+  const maxTok = Math.max.apply(null, days.map(function (d) { return d.total })) || 1
+  const maxCost = Math.max.apply(null, days.map(function (d) { return costByDay[d.d] || 0 })) || 1
+  const n = days.length, slot = plotW / n, bw = Math.min(46, slot * 0.62)
+  const out = ['<svg viewBox="0 0 ' + w + ' ' + h + '" class="chart">']
+
+  // y 轴刻度(token)
+  for (let g = 0; g <= 4; g++) {
+    const y = padT + plotH - plotH * g / 4
+    out.push('<line x1="' + padL + '" x2="' + (w - padR) + '" y1="' + y.toFixed(1) + '" y2="' + y.toFixed(1) + '" class="grid"/>')
+    out.push('<text x="' + (padL - 8) + '" y="' + (y + 4).toFixed(1) + '" text-anchor="end" class="axis">' + fmt(maxTok * g / 4) + '</text>')
+    out.push('<text x="' + (w - padR + 8) + '" y="' + (y + 4).toFixed(1) + '" class="axis cost-axis">' + money(maxCost * g / 4) + '</text>')
+  }
+
+  const line: Array<[number, number, number, string]> = []
+  days.forEach(function (d, i) {
+    const x = padL + slot * i + (slot - bw) / 2
+    let yBase = padT + plotH
+    const segs = [
+      { v: d.cacheRead, c: CATS[0].color }, { v: d.cacheWrite, c: CATS[1].color },
+      { v: d.input, c: CATS[2].color }, { v: d.output, c: CATS[3].color }
+    ]
+    segs.forEach(function (s) {
+      const sh = (s.v / maxTok) * plotH
+      if (sh <= 0) return
+      yBase -= sh
+      out.push('<rect x="' + x.toFixed(1) + '" y="' + yBase.toFixed(1) + '" width="' + bw.toFixed(1) +
+        '" height="' + sh.toFixed(1) + '" fill="' + s.c + '"><title>' + d.d + ' ' + fmt(s.v) + '</title></rect>')
+    })
+    out.push('<text x="' + (x + bw / 2).toFixed(1) + '" y="' + (h - 12) + '" text-anchor="middle" class="axis">' + esc(dateShort(new Date(d.d + 'T00:00:00').getTime())) + '</text>')
+    const c = costByDay[d.d] || 0
+    line.push([padL + slot * i + slot / 2, padT + plotH - (c / maxCost) * plotH, c, d.d])
+  })
+  out.push('<polyline class="costline" points="' + line.map(function (p) { return p[0].toFixed(1) + ',' + p[1].toFixed(1) }).join(' ') + '"/>')
+  line.forEach(function (p) {
+    out.push('<circle cx="' + p[0].toFixed(1) + '" cy="' + p[1].toFixed(1) + '" r="3.2" class="costdot"><title>' +
+      p[3] + ' 成本 ' + money(p[2]) + '</title></circle>')
+  })
+  out.push('</svg>')
+  return out.join('')
+}
+
+/** weekday×hour 活动热力格(7 行 × 24 列)。matrix[w][h]=token;全 0 或空返回降级提示。 */
+export function heatmap(matrix: number[][], opts: { caption?: string } = {}): string {
+  const rows = matrix && matrix.length === 7 ? matrix : null
+  let max = 0
+  let sum = 0
+  let nonzero = 0
+  if (rows) {
+    rows.forEach(function (r) {
+      r.forEach(function (v) {
+        if (v > max) max = v
+        sum += v
+        if (v > 0) nonzero++
+      })
+    })
+  }
+  if (!rows || !nonzero || !max) {
+    return '<div class="empty">暂无小时粒度数据 —— 重新跑 tokanary refresh 获取小时粒度后可见热力图。</div>'
+  }
+  const WAYS = ['日', '一', '二', '三', '四', '五', '六']
+  const cell = 28, gap = 3, padL = 36, padT = 22, padB = 8, padR = 8
+  const w = padL + 24 * (cell + gap) + padR
+  const h = padT + 7 * (cell + gap) + padB
+  const out = ['<svg viewBox="0 0 ' + w + ' ' + h + '" class="chart heatmap" preserveAspectRatio="xMidYMid meet">']
+  for (let hr = 0; hr < 24; hr += 3) {
+    const x = padL + hr * (cell + gap) + cell / 2
+    out.push('<text x="' + x.toFixed(1) + '" y="' + (padT - 8) + '" text-anchor="middle" class="axis">' +
+      String(hr).padStart(2, '0') + '</text>')
+  }
+  for (let wd = 0; wd < 7; wd++) {
+    const y = padT + wd * (cell + gap)
+    out.push('<text x="' + (padL - 8) + '" y="' + (y + cell / 2 + 4) + '" text-anchor="end" class="axis">' +
+      WAYS[wd] + '</text>')
+    for (let hr = 0; hr < 24; hr++) {
+      const v = matrix[wd][hr] || 0
+      const x = padL + hr * (cell + gap)
+      const op = v > 0 ? (0.18 + 0.82 * Math.sqrt(v / max)) : 0
+      const fill = v > 0 ? 'var(--accent)' : 'var(--line)'
+      const title = WAYS[wd] + ' ' + String(hr).padStart(2, '0') + ':00 · ' + fmt(v) + ' token'
+      out.push('<rect x="' + x + '" y="' + y + '" width="' + cell + '" height="' + cell +
+        '" rx="4" fill="' + fill + '" opacity="' + (v > 0 ? op.toFixed(3) : '0.35') +
+        '"><title>' + esc(title) + '</title></rect>')
+    }
+  }
+  out.push('</svg>')
+  const cap = opts.caption || ('范围内合计 ' + fmt(sum) + ' token · ' + nonzero + ' 个活跃小时格')
+  return out + '<div class="hm-cap dim small">' + esc(cap) + '</div>'
+}

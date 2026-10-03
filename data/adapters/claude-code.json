@@ -1,0 +1,26 @@
+{
+  "id": "claude-code",
+  "label": "Claude Code",
+  "kind": "jsonl",
+  "paths": ["{home}/.claude/projects/**/*.jsonl"],
+  "prefilter": "\"usage\"",
+
+  "require": ["message.usage"],
+  "dedup": ["message.id", "requestId"],
+
+  "fields": {
+    "model": ["message.model"],
+    "session": ["sessionId", "$dir"],
+    "time": ["timestamp"],
+    "input": ["message.usage.input_tokens"],
+    "cacheRead": ["message.usage.cache_read_input_tokens"],
+    "cacheWrite": ["message.usage.cache_creation_input_tokens"],
+    "output": ["message.usage.output_tokens"],
+    "reasoning": [
+      "message.usage.output_tokens_details.thinking_tokens",
+      "message.usage.output_tokens_details.reasoning_tokens"
+    ]
+  },
+
+  "note": "按 message.id(+requestId) 去重：一条 assistant 消息会写成多行流式片段，本机实测 1620 行里 938 行是重复，不去重会虚高近 2.4 倍。thinking_tokens 是 output_tokens 的子集，只展示不重复计费。"
+}

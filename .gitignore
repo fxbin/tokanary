@@ -1,0 +1,33 @@
+# dependencies
+node_modules/
+
+# frontend build / tooling caches
+web/dist/
+web/.vite/
+*.tsbuildinfo
+web/coverage/
+
+# runtime scratch: warehouse, snapshots, logs, screenshots, build products
+.cache/
+
+# built binaries
+/tokanary
+/tokanary.exe
+/tokanary-desktop
+/tokanary-desktop.exe
+
+# analysis store (rebuildable)
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+
+# local env / secrets
+.env
+.env.*
+
+# OS junk
+.DS_Store
+
+# agent tooling artifacts
+.vidt/
+.agent-memory/

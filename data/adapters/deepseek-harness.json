@@ -1,0 +1,35 @@
+{
+  "id": "deepseek-harness",
+  "label": "DeepSeek Harness（官方）",
+  "kind": "zstd-jsonl",
+  "paths": [
+    "%DSH_HOME%/sessions/**/*.jsonl.zstd",
+    "%DSH_HOME%/sessions/**/*.jsonl",
+    "{home}/.dsh/sessions/**/*.jsonl.zstd",
+    "{home}/.dsh/sessions/**/*.jsonl"
+  ],
+  "prefilter": "\"usage\"",
+
+  "where": { "type": "assistant/message" },
+  "require": ["data.usage"],
+  "dedup": ["data.message.id"],
+
+  "fields": {
+    "model": [
+      "data.message.source.model",
+      "data.message.source.replayState.response.model",
+      "data.request.model",
+      "data.request.context.model",
+      "data.request.header.model"
+    ],
+    "session": ["$dir"],
+    "time": ["time"],
+    "input": ["data.usage.inputTokens"],
+    "cacheRead": ["data.usage.cacheReadTokens"],
+    "cacheWrite": ["data.usage.cacheWriteTokens"],
+    "output": ["data.usage.outputTokens"],
+    "reasoning": []
+  },
+
+  "note": "原生 DeepSeek Harness（CLI/官方 Desktop）：home 默认 ~/.dsh，可用 DSH_HOME 覆盖。多帧 zstd 或 compression:none 的纯 JSONL 均可读。data.usage.inputTokens 已是非缓存（禁 inputSubtract）；time 为 Unix ms → ISO；按 data.message.id 去重。第三方包装壳走 deepseek-harness-wrapper 适配器。"
+}
