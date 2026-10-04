@@ -205,6 +205,8 @@ func ReadRecords(m *Manifest, ctx *Context) []*rawObj {
 	switch m.KindOrDefault() {
 	case "jsonl":
 		return ReadJSONL(ExpandPaths(ctx.patternsFor(m), ctx), ctx)
+	case "json":
+		return ReadJSON(ExpandPaths(ctx.patternsFor(m), ctx), ctx)
 	case "zstd-jsonl":
 		return ReadZstdJSONL(ExpandPaths(ctx.patternsFor(m), ctx), ctx)
 	case "sqlite":

@@ -1,0 +1,24 @@
+{
+  "id": "github-copilot",
+  "label": "GitHub Copilot",
+  "kind": "jsonl",
+  "paths": [
+    "{home}/.copilot/**/*.jsonl",
+    "%APPDATA%/GitHub Copilot/**/*.jsonl",
+    "{home}/Library/Application Support/GitHub Copilot/**/*.jsonl"
+  ],
+  "prefilter": ["tokens", "usage", "prompt_tokens"],
+  "require": [],
+  "where": {},
+  "dedup": ["id", "requestId", "$file#$line"],
+  "fields": {
+    "model": ["model", "model_id", "engine"],
+    "session": ["session_id", "conversationId", "$dir"],
+    "time": ["timestamp", "created_at", "time"],
+    "input": ["usage.prompt_tokens", "tokens.prompt", "prompt_tokens"],
+    "output": ["usage.completion_tokens", "tokens.completion", "completion_tokens"],
+    "cacheRead": ["usage.prompt_tokens_details.cached_tokens", "tokens.cached", "cached_tokens"],
+    "reasoning": ["usage.completion_tokens_details.reasoning_tokens"]
+  },
+  "note": "GitHub Copilot 本地/扩展日志；字段多源，按顺序取第一个非空。若仅有 summary 行可能不含 usage，需在实际日志上标定。"
+}

@@ -249,3 +249,52 @@ func ReadJSONL(paths []string, ctx *Context) []*rawObj {
 	}
 	return out
 }
+
+// ReadJSON reads one whole JSON document per file: either a single object or
+// an array of objects (Gemini CLI chat dumps, Cline task logs, …).
+func ReadJSON(paths []string, ctx *Context) []*rawObj {
+	pats := ctx.Prefilter
+	var out []*rawObj
+	for _, f := range paths {
+		data, err := os.ReadFile(f)
+		if err != nil {
+			continue
+		}
+		if len(pats) > 0 {
+			hit := false
+			for _, p := range pats {
+				if p != "" && strings.Contains(string(data), p) {
+					hit = true
+					break
+				}
+			}
+			if !hit {
+				continue
+			}
+		}
+		dir := filepath.Base(filepath.Dir(f))
+		trimmed := strings.TrimSpace(string(data))
+		if trimmed == "" {
+			continue
+		}
+		if strings.HasPrefix(trimmed, "[") {
+			var arr []map[string]any
+			if err := json.Unmarshal([]byte(trimmed), &arr); err != nil {
+				continue
+			}
+			for i, obj := range arr {
+				if obj == nil {
+					continue
+				}
+				out = append(out, &rawObj{Obj: obj, File: f, Dir: dir, Line: i + 1})
+			}
+			continue
+		}
+		var obj map[string]any
+		if err := json.Unmarshal([]byte(trimmed), &obj); err != nil || obj == nil {
+			continue
+		}
+		out = append(out, &rawObj{Obj: obj, File: f, Dir: dir, Line: 1})
+	}
+	return out
+}

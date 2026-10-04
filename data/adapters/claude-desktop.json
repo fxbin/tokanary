@@ -1,0 +1,50 @@
+{
+  "id": "claude-desktop",
+  "label": "Claude Desktop",
+  "kind": "jsonl",
+  "paths": [
+    "{home}/.claude/projects/**/*.jsonl",
+    "{home}/Library/Application Support/Claude/**/*.jsonl",
+    "%APPDATA%/Claude/**/*.jsonl"
+  ],
+  "prefilter": "\"usage\"",
+  "require": [
+    "message.usage"
+  ],
+  "where": {},
+  "dedup": [
+    "message.id",
+    "requestId",
+    "$file#$line"
+  ],
+  "fields": {
+    "model": [
+      "message.model"
+    ],
+    "session": [
+      "sessionId",
+      "$dir"
+    ],
+    "time": [
+      "timestamp"
+    ],
+    "input": [
+      "message.usage.input_tokens"
+    ],
+    "cacheRead": [
+      "message.usage.cache_read_input_tokens"
+    ],
+    "cacheWrite": [
+      "message.usage.cache_creation_input_tokens"
+    ],
+    "output": [
+      "message.usage.output_tokens"
+    ],
+    "reasoning": [
+      "message.usage.output_tokens.details.thinking_tokens"
+    ]
+  },
+  "caveat": "与 Claude Code 共享 ~/.claude/projects 时会重复计数；二者只应启用其一。",
+  "note": "Claude Desktop / 旁路客户端写 JSONL；口径同 Claude Code（非缓存 input、output 含 thinking）。",
+  "enabled": false
+}

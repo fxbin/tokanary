@@ -1,0 +1,25 @@
+{
+  "id": "cline",
+  "label": "Cline",
+  "kind": "json",
+  "paths": [
+    "{home}/.cline/**/*.json",
+    "{home}/Library/Application Support/Cline/**/*.json",
+    "%APPDATA%/Cline/**/*.json",
+    "{home}/.vscode/extensions/saoudrizwan.claude-dev-*/**/*.json"
+  ],
+  "prefilter": ["cacheReads", "cacheWrites", "inputTokens", "promptTokens"],
+  "require": [],
+  "where": {},
+  "dedup": ["id", "messageId", "$file#$line"],
+  "fields": {
+    "model": ["model", "apiProvider.modelId"],
+    "session": ["taskId", "sessionId", "$dir"],
+    "time": ["timestamp", "ts"],
+    "input": ["inputTokens", "promptTokens", "usage.prompt_tokens"],
+    "output": ["outputTokens", "completionTokens", "usage.completion_tokens"],
+    "cacheRead": ["cacheReads", "cache_read_input_tokens"],
+    "cacheWrite": ["cacheWrites", "cache_creation_input_tokens"]
+  },
+  "note": "Cline / VS Code 扩展任务记录；字段名随版本变化，多路径回退。"
+}

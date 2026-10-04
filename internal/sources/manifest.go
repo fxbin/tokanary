@@ -129,7 +129,7 @@ func LoadAdapters(dir string, only []string) ([]*Manifest, error) {
 }
 
 // KnownKinds is the closed set validate() accepts.
-var KnownKinds = []string{"jsonl", "zstd-jsonl", "sqlite"}
+var KnownKinds = []string{"jsonl", "json", "zstd-jsonl", "sqlite"}
 
 // Validate mirrors collect_sources.validate. It checks the declaration only and
 // never parses data, so it is cheap enough to run on every collection.
@@ -139,7 +139,7 @@ func Validate(m *Manifest) []string {
 	if !contains(KnownKinds, kind) {
 		errs = append(errs, "kind 必须是 "+join(KindsForMsg)+" 之一")
 	}
-	if (kind == "jsonl" || kind == "zstd-jsonl") && len(m.Paths) == 0 {
+	if (kind == "jsonl" || kind == "json" || kind == "zstd-jsonl") && len(m.Paths) == 0 {
 		errs = append(errs, kind+" 源必须声明 paths")
 	}
 	if kind == "sqlite" && (m.DB == "" || m.Query == "") {
