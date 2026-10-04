@@ -1,6 +1,6 @@
 import { ref, onUnmounted } from 'vue'
 
-const POLL_MS = 120_000
+const POLL_MS = 30_000 // 读取时增量刷新，30s 足够接近实时
 
 export function useDashboard() {
   const dataRef = ref<any>(null)

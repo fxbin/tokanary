@@ -29,8 +29,9 @@ cd web && npm test && npm run build
 
 | 命令 | 作用 |
 |---|---|
-| `tokanary refresh` | 采集 + 重建仓库 + 构建前端 |
+| `tokanary refresh` | 全量采集 + 重建仓库 + 构建前端 |
 | `tokanary collect` | 只采集外部 CLI（源文件未变则复用；`--full` 全量） |
+| 桌面 `/api/dashboard` | **读取时增量刷新**（`internal/refresh.Touch`）：适配器 mtime + pi.sqlite 指纹 |
 | `tokanary prices` | 生成 `.cache/prices-raw.json` |
 | `tokanary build` | 重建仓库并写 `.cache/dashboard.json` |
 

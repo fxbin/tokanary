@@ -20,6 +20,7 @@ import (
 	"github.com/wailsapp/wails/v3/pkg/application"
 
 	"github.com/fxbin/tokanary/internal/dashboard"
+	"github.com/fxbin/tokanary/internal/refresh"
 	"github.com/fxbin/tokanary/internal/webui"
 )
 
@@ -69,6 +70,13 @@ func (s *APIService) serveDashboard(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Allow", "GET, HEAD")
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
+	}
+	// Read-time incremental refresh: pick up new agent log lines without a
+	// full `tokanary refresh`. Cheap when nothing changed (mtime fingerprints).
+	if _, err := refresh.Touch(s.repoRoot); err != nil {
+		// Still serve whatever the warehouse has — a transient collect error
+		// must not blank the dashboard.
+		fmt.Fprintf(os.Stderr, "[warn] live refresh: %v\n", err)
 	}
 	payload, err := dashboard.Assemble(dashboard.Options{RepoRoot: s.repoRoot})
 	if err != nil {
