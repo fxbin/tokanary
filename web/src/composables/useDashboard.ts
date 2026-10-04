@@ -5,9 +5,11 @@ const POLL_MS = 30_000 // 读取时增量刷新，30s 足够接近实时
 export function useDashboard() {
   const dataRef = ref<any>(null)
   const pollFail = ref(false)
+  const loading = ref(false)
   let pollTimer: number | null = null
 
   async function loadDashboard() {
+    loading.value = true
     try {
       const res = await fetch('api/dashboard', { cache: 'no-store' })
       if (!res.ok) throw new Error('HTTP ' + res.status)
@@ -20,6 +22,8 @@ export function useDashboard() {
       }
     } catch {
       pollFail.value = true
+    } finally {
+      loading.value = false
     }
   }
 
@@ -35,5 +39,5 @@ export function useDashboard() {
   }
   onUnmounted(stopPolling)
 
-  return { dataRef, pollFail, loadDashboard, startPolling, stopPolling }
+  return { dataRef, pollFail, loading, loadDashboard, startPolling, stopPolling }
 }

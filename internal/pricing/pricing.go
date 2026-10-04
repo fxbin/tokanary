@@ -41,6 +41,9 @@ var (
 	reGA       = regexp.MustCompile(`--?ga[-_]?\d{4,6}$`)
 	reDateNum  = regexp.MustCompile(`-\d{6}$`)
 	reFreeTail = regexp.MustCompile(`(?i)[-:]free$`)
+	// gpt-5.4(xhigh) → gpt-5.4（Codex 效率档）；不剥 mini/pro/flash 等真实型号后缀
+	reEffParen = regexp.MustCompile(`\([^)]*\)$`)
+	reEffDash  = regexp.MustCompile(`(?i)-+(?:x-?high|x-?low|efficiency|think(?:ing)?-high)$`)
 )
 
 // keyVariants maps a gateway model id onto the candidate keys that might exist
@@ -92,6 +95,8 @@ func KeyVariants(modelID string) []string {
 	expand(func(s string) string { return reInt.ReplaceAllString(s, "") })
 	expand(func(s string) string { return reGA.ReplaceAllString(s, "") })
 	expand(func(s string) string { return reDateNum.ReplaceAllString(s, "") })
+	expand(func(s string) string { return reEffParen.ReplaceAllString(s, "") })
+	expand(func(s string) string { return reEffDash.ReplaceAllString(s, "") })
 
 	// 3) drop a provider path prefix (kimi/kimi-k3 -> kimi-k3)
 	for _, s := range append([]string{}, staged...) {

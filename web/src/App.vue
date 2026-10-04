@@ -38,7 +38,9 @@
             <button v-for="(r, k) in RANGES" :key="k" :class="{ on: range === k }"
               @click="setRange(k)">{{ r.label }}</button>
           </div>
-          <button class="btn-ghost" id="btn-reload-top" @click="loadDashboard">重新读取</button>
+          <button class="btn-ghost" id="btn-reload-top" @click="loadDashboard" :disabled="loading">
+            {{ loading ? '读取中…' : '重新读取' }}
+          </button>
         </div>
       </header>
 
@@ -83,7 +85,7 @@ const TABS = [
 const st = reactive<UiState>(defaultUiState())
 const { theme, applyTheme, toggleTheme, themeIcon, themeTitle } = useTheme()
 const { tab, range, readHash, writeHash, setRange, onHashChange } = useHashRoute(TABS.map((t) => t.k))
-const { dataRef, pollFail, loadDashboard, startPolling } = useDashboard()
+const { dataRef, pollFail, loading, loadDashboard, startPolling } = useDashboard()
 const { ioText, saveState, loadState, loadCustomPrices, exportPrices, importPrices } = usePriceIo(st)
 
 function onDocInput(e: Event) {

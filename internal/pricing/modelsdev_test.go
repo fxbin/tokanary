@@ -186,3 +186,23 @@ func TestGeneratedTableRoundTripsThroughLoadCurated(t *testing.T) {
 		}
 	}
 }
+
+func TestKeyVariantsStripsEfficiencySuffix(t *testing.T) {
+	vs := KeyVariants("gpt-5.4(xhigh)")
+	found := false
+	for _, v := range vs {
+		if v == "gpt-5.4" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("gpt-5.4(xhigh) should derive gpt-5.4, got %v", vs)
+	}
+	// must NOT peel mini/pro
+	vs2 := KeyVariants("gpt-5.4-mini")
+	for _, v := range vs2 {
+		if v == "gpt-5.4" {
+			t.Fatalf("gpt-5.4-mini must not strip -mini")
+		}
+	}
+}
