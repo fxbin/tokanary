@@ -598,7 +598,11 @@ import { fileURLToPath } from 'node:url'
 import { dirname, resolve } from 'node:path'
 
 describe('glass contract (slice2)', () => {
-  const css = readFileSync(resolve(dirname(fileURLToPath(import.meta.url)), './App.vue'), 'utf8')
+  const css = [
+    readFileSync(resolve(dirname(fileURLToPath(import.meta.url)), './styles/shell.css'), 'utf8'),
+    readFileSync(resolve(dirname(fileURLToPath(import.meta.url)), './styles/ui.css'), 'utf8'),
+    readFileSync(resolve(dirname(fileURLToPath(import.meta.url)), './styles/tokens.css'), 'utf8')
+  ].join('\n')
 
   it('backdrop-filter 同屏 ≤3 且必须存在(液态玻璃硬约束);数据面禁 blur', () => {
     const blurs = css.match(/(^|[^-\w])backdrop-filter:\s*blur/g) || []

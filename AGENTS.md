@@ -52,6 +52,25 @@ data/adapters/    适配器声明
 testdata/         合成夹具（勿当真实数据）
 ```
 
+## 设计语言
+
+- **现行标准见 [DESIGN.md](DESIGN.md)（青簡）**——改 UI 前必读
+- Token：`web/src/styles/tokens.css`；壳：`shell.css`；内容组件：`ui.css`
+- 分类色唯一源 `web/src/palette.ts`；禁止内联 hex
+
+## 前端布局
+
+```
+web/src/
+  App.vue           壳装配 + 事件委托
+  composables/      useTheme / useHashRoute / useDashboard / usePriceIo
+  styles/           tokens.css · shell.css · ui.css
+  render/           分区块 HTML
+  pricing.ts        计价核心
+  range.ts          范围聚合
+  palette.ts · charts.ts
+```
+
 ## 禁止
 
 - 提交 `.cache/`、`web/dist/`、`node_modules/`、二进制、本机价目/网关文件
