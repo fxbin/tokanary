@@ -1,0 +1,50 @@
+{
+  "id": "xiaomi-mimo",
+  "label": "Xiaomi MiMo",
+  "kind": "sqlite",
+  "db": "{home}/.local/share/mimocode/mimocode.db",
+  "query": "select id, session_id, agent_id, time_created, data from message where data like '%\"tokens\"%' order by time_created",
+  "json_column": "data",
+  "require": [
+    "tokens"
+  ],
+  "where": {
+    "role": "assistant"
+  },
+  "dedup": [
+    "id"
+  ],
+  "fields": {
+    "model": [
+      "modelID",
+      "model.modelID"
+    ],
+    "session": [
+      "session_id",
+      "$dir"
+    ],
+    "time": [
+      "time.created",
+      "time_created"
+    ],
+    "input": [
+      "tokens.input"
+    ],
+    "output": [
+      "tokens.output"
+    ],
+    "cacheRead": [
+      "tokens.cache.read"
+    ],
+    "cacheWrite": [
+      "tokens.cache.write"
+    ],
+    "reasoning": [
+      "tokens.reasoning"
+    ]
+  },
+  "outputAdd": [
+    "tokens.reasoning"
+  ],
+  "note": "小米 MiMo Desktop / mimocode.db：message.data 含 tokens{input,output,reasoning,cache{read,write}}。reasoning 与 output 并列（非子集），故 outputAdd 并入计费。"
+}

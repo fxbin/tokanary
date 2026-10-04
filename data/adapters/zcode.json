@@ -1,0 +1,38 @@
+{
+  "id": "zcode",
+  "label": "ZCode",
+  "kind": "sqlite",
+  "db": "{home}/.zcode/cli/db/db.sqlite",
+  "query": "select id, session_id, turn_id, model_id, input_tokens, output_tokens, reasoning_tokens, cache_creation_input_tokens, cache_read_input_tokens, started_at, completed_at, status from model_usage where status = 'completed' order by started_at",
+  "require": [],
+  "dedup": [
+    "id"
+  ],
+  "fields": {
+    "model": [
+      "model_id"
+    ],
+    "session": [
+      "session_id"
+    ],
+    "time": [
+      "started_at"
+    ],
+    "input": [
+      "input_tokens"
+    ],
+    "output": [
+      "output_tokens"
+    ],
+    "cacheRead": [
+      "cache_read_input_tokens"
+    ],
+    "cacheWrite": [
+      "cache_creation_input_tokens"
+    ],
+    "reasoning": [
+      "reasoning_tokens"
+    ]
+  },
+  "note": "对齐 CodeBurn zcode.ts：~/.zcode/cli/db/db.sqlite 的 model_usage（v0.14.x 核实过 schema）。GLM 订阅制，成本用 models.dev 单价估算。"
+}
