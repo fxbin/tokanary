@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" role="img" aria-label="Tokanary">
+  <defs>
+    <linearGradient id="qing" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#5A9BB5"/>
+      <stop offset="100%" stop-color="#2E6880"/>
+    </linearGradient>
+    <linearGradient id="paper" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#FFFCF9"/>
+      <stop offset="100%" stop-color="#F3F0EB"/>
+    </linearGradient>
+  </defs>
+
+  <!-- squircle field -->
+  <path id="field" d="M512 48c118 0 176 0 232 20 54 20 96 62 116 116 20 56 20 114 20 232s0 176-20 232c-20 54-62 96-116 116-56 20-114 20-232 20s-176 0-232-20c-54-20-96-62-116-116-20-56-20-114-20-232s0-176 20-232c20-54 62-96 116-116 56-20 114-20 232-20z" fill="url(#paper)"/>
+  <!-- hairline frame -->
+  <path d="M512 48c118 0 176 0 232 20 54 20 96 62 116 116 20 56 20 114 20 232s0 176-20 232c-20 54-62 96-116 116-56 20-114 20-232 20s-176 0-232-20c-54-20-96-62-116-116-20-56-20-114-20-232s0-176 20-232c20-54 62-96 116-116 56-20 114-20 232-20z" fill="none" stroke="#E5E1DA" stroke-width="12"/>
+
+  <!-- ledger baseline -->
+  <rect x="220" y="748" width="584" height="18" rx="9" fill="#292624" opacity=".88"/>
+
+  <!-- stacked token bars → canary silhouette -->
+  <rect x="268" y="520" width="88" height="200" rx="18" fill="#B0D2B0"/>
+  <rect x="392" y="380" width="96" height="340" rx="20" fill="#46839D"/>
+  <rect x="524" y="280" width="104" height="440" rx="22" fill="url(#qing)"/>
+
+  <!-- canary head + wing on tallest bar -->
+  <circle cx="656" cy="250" r="58" fill="#2E6880"/>
+  <!-- beak -->
+  <path d="M708 242 L788 268 L708 286 Z" fill="#46839D"/>
+  <!-- eye -->
+  <circle cx="672" cy="236" r="10" fill="#FFFCF9"/>
+  <circle cx="674" cy="236" r="5" fill="#292624"/>
+  <!-- wing notch -->
+  <path d="M548 430c40-70 110-110 168-118-28 48-24 96 4 140-70 18-128 8-172-22z" fill="#FFFCF9" opacity=".22"/>
+
+  <!-- small token dots (data points) -->
+  <circle cx="250" cy="300" r="16" fill="#46839D" opacity=".35"/>
+  <circle cx="300" cy="240" r="10" fill="#46839D" opacity=".25"/>
+  <circle cx="820" cy="420" r="14" fill="#B0D2B0" opacity=".55"/>
+</svg>

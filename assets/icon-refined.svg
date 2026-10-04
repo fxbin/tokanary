@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" role="img" aria-label="Tokanary">
+  <defs>
+    <linearGradient id="qing" x1="0.2" y1="0" x2="0.8" y2="1">
+      <stop offset="0%" stop-color="#4E8FA8"/>
+      <stop offset="100%" stop-color="#2A6278"/>
+    </linearGradient>
+    <linearGradient id="paper" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#FFFCF9"/>
+      <stop offset="100%" stop-color="#F0EBE3"/>
+    </linearGradient>
+    <clipPath id="disc">
+      <circle cx="512" cy="430" r="210"/>
+    </clipPath>
+  </defs>
+
+  <!-- squircle -->
+  <rect width="1024" height="1024" rx="224" fill="url(#paper)"/>
+  <rect x="8" y="8" width="1008" height="1008" rx="218" fill="none" stroke="#E5E1DA" stroke-width="10"/>
+
+  <!-- token disc -->
+  <circle cx="512" cy="430" r="210" fill="url(#qing)"/>
+
+  <!-- porcelain highlight (clean crescent, not a bite) -->
+  <g clip-path="url(#disc)">
+    <ellipse cx="430" cy="330" rx="92" ry="58" transform="rotate(-28 430 330)" fill="#FFFFFF" opacity="0.18"/>
+  </g>
+  <!-- thin rim light -->
+  <circle cx="512" cy="430" r="210" fill="none" stroke="#7EB0C4" stroke-width="6" opacity="0.35"/>
+
+  <!-- sage micro-notch: cost tick, not a hole -->
+  <rect x="668" y="248" width="28" height="92" rx="14" fill="#B0D2B0" transform="rotate(18 682 294)"/>
+
+  <!-- ledger cradle: flat U, short uprights (not bag handles) -->
+  <path d="M318 520 V628 Q318 668 358 668 H666 Q706 668 706 628 V520"
+        fill="none" stroke="#2E6880" stroke-width="36" stroke-linecap="round" stroke-linejoin="round"/>
+
+  <!-- single ink ledger line -->
+  <rect x="318" y="748" width="388" height="28" rx="14" fill="#292624"/>
+</svg>

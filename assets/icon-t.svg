@@ -1,0 +1,54 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" role="img" aria-label="Tokanary">
+  <defs>
+    <linearGradient id="t1" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#6AA8C0"/>
+      <stop offset="55%" stop-color="#2E6880"/>
+      <stop offset="100%" stop-color="#1F4E5F"/>
+    </linearGradient>
+    <linearGradient id="paper" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#FFFCF9"/>
+      <stop offset="100%" stop-color="#F0EBE3"/>
+    </linearGradient>
+    <linearGradient id="sage" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#C5DEC5"/>
+      <stop offset="100%" stop-color="#9FC49F"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="1024" height="1024" rx="224" fill="url(#paper)"/>
+
+  <!-- T crossbar with canary-wing tip on the right -->
+  <path d="
+    M 190 300
+    H 720
+    C 820 300 890 340 920 400
+    C 945 450 930 500 880 520
+    C 830 540 780 510 750 470
+    C 730 445 710 430 680 430
+    H 575
+    V 820
+    Q 575 870 525 870
+    H 430
+    Q 380 870 380 820
+    V 430
+    H 280
+    Q 210 430 190 380
+    Q 175 330 190 300
+    Z
+  " fill="url(#t1)"/>
+
+  <!-- sage wing accent -->
+  <path d="
+    M 720 300
+    C 820 300 890 340 920 400
+    C 945 450 930 500 880 520
+    C 860 500 845 475 835 450
+    C 820 405 790 360 745 330
+    Z
+  " fill="url(#sage)"/>
+
+  <!-- ascending cost bars carved into stem -->
+  <path d="M 420 720 h 52 q 18 0 18 18 v 72 h -88 v -72 q 0 -18 18 -18 z" fill="#D8EAF2" opacity=".95"/>
+  <path d="M 488 640 h 52 q 18 0 18 18 v 152 h -88 v -152 q 0 -18 18 -18 z" fill="#B8D8E6" opacity=".95"/>
+  <path d="M 556 560 h 36 q 18 0 18 18 v 232 h -72 v -232 q 0 -18 18 -18 z" fill="#9CC8D8" opacity=".9"/>
+</svg>

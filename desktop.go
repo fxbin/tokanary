@@ -154,9 +154,15 @@ func main() {
 	api := &APIService{repoRoot: repoRoot}
 	svc := &DesktopService{repoRoot: repoRoot}
 
+	var appIcon []byte
+	if b, err := os.ReadFile(filepath.Join(repoRoot, "assets", "app-icon-1024.png")); err == nil {
+		appIcon = b
+	}
+
 	app := application.New(application.Options{
 		Name:        "Tokanary",
 		Description: "本地 AI 用量与成本看板",
+		Icon:        appIcon,
 		Services: []application.Service{
 			application.NewServiceWithOptions(api, application.ServiceOptions{
 				Name:  "dashboard",
