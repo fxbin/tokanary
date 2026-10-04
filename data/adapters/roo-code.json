@@ -1,0 +1,24 @@
+{
+  "id": "roo-code",
+  "label": "Roo Code",
+  "kind": "json",
+  "paths": [
+    "{home}/Library/Application Support/Code/User/globalStorage/rooveterinaryinc.roo-cline/**/*.json",
+    "{home}/.config/Code/User/globalStorage/rooveterinaryinc.roo-cline/**/*.json",
+    "%APPDATA%/Code/User/globalStorage/rooveterinaryinc.roo-cline/**/*.json",
+    "{home}/Library/Application Support/Cursor/User/globalStorage/rooveterinaryinc.roo-cline/**/*.json"
+  ],
+  "prefilter": ["cacheReads", "inputTokens", "promptTokens", "usage"],
+  "require": [],
+  "dedup": ["id", "messageId", "$file#$line"],
+  "fields": {
+    "model": ["model", "apiProvider.modelId"],
+    "session": ["taskId", "sessionId", "$dir"],
+    "time": ["timestamp", "ts"],
+    "input": ["inputTokens", "promptTokens", "usage.prompt_tokens"],
+    "output": ["outputTokens", "completionTokens", "usage.completion_tokens"],
+    "cacheRead": ["cacheReads", "cache_read_input_tokens"],
+    "cacheWrite": ["cacheWrites", "cache_creation_input_tokens"]
+  },
+  "note": "Roo Code（VS Code 扩展）任务/API 记录；字段名随版本漂移，多路径回退。"
+}

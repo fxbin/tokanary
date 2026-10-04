@@ -1,0 +1,30 @@
+{
+  "id": "cursor",
+  "label": "Cursor",
+  "kind": "sqlite",
+  "db": "{home}/Library/Application Support/Cursor/User/globalStorage/state.vscdb",
+  "query": "select key as id, json_extract(value, $.tokenCount.inputTokens) as input_tokens, json_extract(value, $.tokenCount.outputTokens) as output_tokens, json_extract(value, $.tokenCount.totalUsedTokens) as total, json_extract(value, $.createdAt) as ts from cursorDiskKV where key like bubbleId:% and (json_extract(value, $.tokenCount.inputTokens) is not null or json_extract(value, $.tokenCount.outputTokens) is not null)",
+  "require": [],
+  "dedup": [
+    "id"
+  ],
+  "fields": {
+    "model": [
+      "model"
+    ],
+    "session": [
+      "id"
+    ],
+    "time": [
+      "ts"
+    ],
+    "input": [
+      "input_tokens"
+    ],
+    "output": [
+      "output_tokens"
+    ]
+  },
+  "caveat": "Windows/Linux 路径见 CodeBurn cursor.ts；bubbleId 含换行的工具行应过滤（driver 阶段）。",
+  "note": "对齐 CodeBurn cursor.ts：state.vscdb cursorDiskKV json_extract tokenCount.*。"
+}

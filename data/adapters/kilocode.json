@@ -1,0 +1,24 @@
+{
+  "id": "kilocode",
+  "label": "Kilo Code",
+  "kind": "json",
+  "paths": [
+    "{home}/Library/Application Support/Code/User/globalStorage/kilocode.kilo-code/**/*.json",
+    "{home}/.config/Code/User/globalStorage/kilocode.kilo-code/**/*.json",
+    "%APPDATA%/Code/User/globalStorage/kilocode.kilo-code/**/*.json",
+    "{home}/Library/Application Support/Cursor/User/globalStorage/kilocode.kilo-code/**/*.json"
+  ],
+  "prefilter": ["cacheReads", "inputTokens", "promptTokens", "usage"],
+  "require": [],
+  "dedup": ["id", "messageId", "$file#$line"],
+  "fields": {
+    "model": ["model", "apiProvider.modelId"],
+    "session": ["taskId", "sessionId", "$dir"],
+    "time": ["timestamp", "ts"],
+    "input": ["inputTokens", "promptTokens", "usage.prompt_tokens"],
+    "output": ["outputTokens", "completionTokens", "usage.completion_tokens"],
+    "cacheRead": ["cacheReads", "cache_read_input_tokens"],
+    "cacheWrite": ["cacheWrites", "cache_creation_input_tokens"]
+  },
+  "note": "Kilo Code（Cline 系）任务记录。"
+}

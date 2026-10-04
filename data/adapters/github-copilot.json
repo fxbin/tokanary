@@ -3,22 +3,52 @@
   "label": "GitHub Copilot",
   "kind": "jsonl",
   "paths": [
-    "{home}/.copilot/**/*.jsonl",
-    "%APPDATA%/GitHub Copilot/**/*.jsonl",
-    "{home}/Library/Application Support/GitHub Copilot/**/*.jsonl"
+    "{home}/.copilot/session-state/**/*.jsonl",
+    "{home}/.config/github-copilot/**/*.jsonl"
   ],
-  "prefilter": ["tokens", "usage", "prompt_tokens"],
+  "prefilter": [
+    "\"usage\"",
+    "tokens",
+    "completion_tokens"
+  ],
   "require": [],
-  "where": {},
-  "dedup": ["id", "requestId", "$file#$line"],
+  "dedup": [
+    "id",
+    "requestId",
+    "$file#$line"
+  ],
   "fields": {
-    "model": ["model", "model_id", "engine"],
-    "session": ["session_id", "conversationId", "$dir"],
-    "time": ["timestamp", "created_at", "time"],
-    "input": ["usage.prompt_tokens", "tokens.prompt", "prompt_tokens"],
-    "output": ["usage.completion_tokens", "tokens.completion", "completion_tokens"],
-    "cacheRead": ["usage.prompt_tokens_details.cached_tokens", "tokens.cached", "cached_tokens"],
-    "reasoning": ["usage.completion_tokens_details.reasoning_tokens"]
+    "model": [
+      "model",
+      "model_id"
+    ],
+    "session": [
+      "session_id",
+      "conversationId",
+      "$dir"
+    ],
+    "time": [
+      "timestamp",
+      "created_at"
+    ],
+    "input": [
+      "usage.input_tokens",
+      "input_tokens",
+      "prompt_tokens"
+    ],
+    "output": [
+      "usage.completion_tokens",
+      "output_tokens",
+      "completion_tokens"
+    ],
+    "cacheRead": [
+      "usage.cache_read_input_tokens",
+      "cached_tokens"
+    ],
+    "reasoning": [
+      "usage.completion_tokens_details.reasoning_tokens"
+    ]
   },
-  "note": "GitHub Copilot 本地/扩展日志；字段多源，按顺序取第一个非空。若仅有 summary 行可能不含 usage，需在实际日志上标定。"
+  "caveat": "CodeBurn 注释：~/.copilot/session-state 只记 output，input/cache 多半缺失，费用会低估；更全的是 agent-traces.db（需 VS Code 开关）。",
+  "note": "对齐 CodeBurn copilot.ts 的 JSONL 回退路径。完整计量需 OTel agent-traces.db（后续可加 sqlite 源）。"
 }

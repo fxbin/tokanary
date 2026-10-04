@@ -1,0 +1,29 @@
+{
+  "id": "goose",
+  "label": "Goose",
+  "kind": "sqlite",
+  "db": "{home}/.local/share/goose/sessions/sessions.db",
+  "query": "select id as session_id, name, working_dir, created_at, updated_at, accumulated_input_tokens as input_tokens, accumulated_output_tokens as output_tokens, provider_name, model_config_json from sessions where accumulated_input_tokens > 0 or accumulated_output_tokens > 0 order by updated_at desc",
+  "require": [],
+  "dedup": [
+    "session_id"
+  ],
+  "fields": {
+    "model": [
+      "provider_name"
+    ],
+    "session": [
+      "session_id"
+    ],
+    "time": [
+      "updated_at"
+    ],
+    "input": [
+      "input_tokens"
+    ],
+    "output": [
+      "output_tokens"
+    ]
+  },
+  "note": "对齐 CodeBurn goose.ts：sessions.accumulated_*_tokens；无 cache 列。"
+}

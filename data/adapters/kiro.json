@@ -1,0 +1,51 @@
+{
+  "id": "kiro",
+  "label": "Kiro",
+  "kind": "json",
+  "paths": [
+    "{home}/.kiro/**/*.json",
+    "{home}/Library/Application Support/Kiro/User/globalStorage/kiro.kiroagent/**/*.json",
+    "{home}/.config/Kiro/User/globalStorage/kiro.kiroagent/**/*.json"
+  ],
+  "prefilter": [
+    "modelId",
+    "token",
+    "usage",
+    "startTime"
+  ],
+  "require": [],
+  "dedup": [
+    "executionId",
+    "id",
+    "$file#$line"
+  ],
+  "fields": {
+    "model": [
+      "modelId",
+      "metadata.modelId"
+    ],
+    "session": [
+      "sessionId",
+      "$dir"
+    ],
+    "time": [
+      "metadata.startTime",
+      "startTime"
+    ],
+    "input": [
+      "inputTokens",
+      "usage.inputTokens"
+    ],
+    "output": [
+      "outputTokens",
+      "usage.outputTokens"
+    ],
+    "cacheRead": [
+      "cacheReadInputTokens"
+    ],
+    "cacheWrite": [
+      "cacheCreationInputTokens"
+    ]
+  },
+  "note": "对齐 CodeBurn kiro.ts：globalStorage/kiro.kiroagent + workspaceStorage；历史聊天用字符估算 token。"
+}

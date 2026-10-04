@@ -1,0 +1,23 @@
+{
+  "id": "kimicode",
+  "label": "KimiCode",
+  "kind": "jsonl",
+  "paths": [
+    "{home}/.kimicode/**/*.jsonl",
+    "{home}/.kimi/code/**/*.jsonl",
+    "{home}/.local/share/kimicode/**/*.jsonl"
+  ],
+  "prefilter": ["\"usage\"", "\"tokens\"", "input_tokens", "prompt_tokens"],
+  "require": [],
+  "dedup": ["id", "messageId", "$file#$line"],
+  "fields": {
+    "model": ["model", "model_id"],
+    "session": ["session_id", "sessionId", "$dir"],
+    "time": ["timestamp", "created_at"],
+    "input": ["usage.input_tokens", "input_tokens", "prompt_tokens"],
+    "output": ["usage.output_tokens", "output_tokens", "completion_tokens"],
+    "cacheRead": ["usage.cache_read_input_tokens", "cache_read_tokens"],
+    "cacheWrite": ["usage.cache_creation_input_tokens", "cache_write_tokens"]
+  },
+  "note": "KimiCode 会话 JSONL；Moonshot 用量字段与 OpenAI 风格兼容层。"
+}

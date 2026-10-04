@@ -202,6 +202,7 @@ func Run(m *Manifest, ctx *Context) []Record {
 
 // ReadRecords dispatches on the manifest kind.
 func ReadRecords(m *Manifest, ctx *Context) []*rawObj {
+	ctx.Manifest = m
 	switch m.KindOrDefault() {
 	case "jsonl":
 		return ReadJSONL(ExpandPaths(ctx.patternsFor(m), ctx), ctx)

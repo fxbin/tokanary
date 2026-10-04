@@ -1,0 +1,51 @@
+{
+  "id": "droid",
+  "label": "Droid",
+  "kind": "jsonl",
+  "paths": [
+    "{home}/.factory/**/sessions/*/*.jsonl",
+    "{home}/.factory/**/*.jsonl"
+  ],
+  "prefilter": [
+    "tokenUsage",
+    "inputTokens"
+  ],
+  "require": [],
+  "dedup": [
+    "id",
+    "$file#$line"
+  ],
+  "fields": {
+    "model": [
+      "model"
+    ],
+    "session": [
+      "sessionId",
+      "$dir"
+    ],
+    "time": [
+      "timestamp"
+    ],
+    "input": [
+      "tokenUsage.inputTokens",
+      "settings.tokenUsage.inputTokens"
+    ],
+    "output": [
+      "tokenUsage.outputTokens",
+      "settings.tokenUsage.outputTokens"
+    ],
+    "cacheRead": [
+      "tokenUsage.cacheReadTokens",
+      "settings.tokenUsage.cacheReadTokens"
+    ],
+    "cacheWrite": [
+      "tokenUsage.cacheCreationTokens",
+      "settings.tokenUsage.cacheCreationTokens"
+    ],
+    "reasoning": [
+      "tokenUsage.thinkingTokens",
+      "settings.tokenUsage.thinkingTokens"
+    ]
+  },
+  "note": "对齐 CodeBurn droid.ts：~/.factory，tokenUsage.{input,output,cache*,thinking}Tokens。"
+}

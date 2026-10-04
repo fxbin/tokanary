@@ -16,6 +16,7 @@ type Context struct {
 	Home      string
 	WorkDir   string
 	Prefilter []string
+	Manifest  *Manifest
 
 	// mutable counters the collector reads back for the note lines
 	Dropped  int
@@ -252,8 +253,14 @@ func ReadJSONL(paths []string, ctx *Context) []*rawObj {
 
 // ReadJSON reads one whole JSON document per file: either a single object or
 // an array of objects (Gemini CLI chat dumps, Cline task logs, …).
+// When the manifest sets json_rows, that nested array is flattened and each
+// element is emitted with parent ids copied in (sessionId, model, …).
 func ReadJSON(paths []string, ctx *Context) []*rawObj {
 	pats := ctx.Prefilter
+	rowsPath := ""
+	if ctx.Manifest != nil {
+		rowsPath = ctx.Manifest.JSONRows
+	}
 	var out []*rawObj
 	for _, f := range paths {
 		data, err := os.ReadFile(f)
@@ -286,6 +293,10 @@ func ReadJSON(paths []string, ctx *Context) []*rawObj {
 				if obj == nil {
 					continue
 				}
+				if rowsPath != "" {
+					out = append(out, flattenRows(obj, rowsPath, f, dir, i+1)...)
+					continue
+				}
 				out = append(out, &rawObj{Obj: obj, File: f, Dir: dir, Line: i + 1})
 			}
 			continue
@@ -294,7 +305,41 @@ func ReadJSON(paths []string, ctx *Context) []*rawObj {
 		if err := json.Unmarshal([]byte(trimmed), &obj); err != nil || obj == nil {
 			continue
 		}
+		if rowsPath != "" {
+			out = append(out, flattenRows(obj, rowsPath, f, dir, 1)...)
+			continue
+		}
 		out = append(out, &rawObj{Obj: obj, File: f, Dir: dir, Line: 1})
+	}
+	return out
+}
+
+// flattenRows expands parent[rowsPath] (an array of objects). Each child gets
+// missing identity fields copied from the parent (sessionId, model, timestamp…).
+func flattenRows(parent map[string]any, rowsPath, file, dir string, line int) []*rawObj {
+	raw, ok := parent[rowsPath]
+	if !ok {
+		return []*rawObj{{Obj: parent, File: file, Dir: dir, Line: line}}
+	}
+	arr, ok := raw.([]any)
+	if !ok {
+		return []*rawObj{{Obj: parent, File: file, Dir: dir, Line: line}}
+	}
+	inherit := []string{"sessionId", "session_id", "id", "model", "modelVersion", "timestamp", "startTime", "createTime"}
+	var out []*rawObj
+	for i, el := range arr {
+		m, ok := el.(map[string]any)
+		if !ok || m == nil {
+			continue
+		}
+		for _, k := range inherit {
+			if _, has := m[k]; !has {
+				if v, ok := parent[k]; ok {
+					m[k] = v
+				}
+			}
+		}
+		out = append(out, &rawObj{Obj: m, File: file, Dir: dir, Line: line*1000 + i})
 	}
 	return out
 }

@@ -1,0 +1,45 @@
+{
+  "id": "qwen-code",
+  "label": "Qwen Code",
+  "kind": "jsonl",
+  "paths": [
+    "{home}/.qwen/projects/*/chats/*.jsonl"
+  ],
+  "prefilter": [
+    "usageMetadata"
+  ],
+  "require": [
+    "usageMetadata"
+  ],
+  "where": {
+    "type": "assistant"
+  },
+  "dedup": [
+    "uuid",
+    "$file#$line"
+  ],
+  "fields": {
+    "model": [
+      "model"
+    ],
+    "session": [
+      "sessionId"
+    ],
+    "time": [
+      "timestamp"
+    ],
+    "input": [
+      "usageMetadata.promptTokenCount"
+    ],
+    "output": [
+      "usageMetadata.candidatesTokenCount"
+    ],
+    "cacheRead": [
+      "usageMetadata.cachedContentTokenCount"
+    ],
+    "reasoning": [
+      "usageMetadata.thoughtsTokenCount"
+    ]
+  },
+  "note": "对齐 CodeBurn qwen.ts：~/.qwen/projects/*/chats/*.jsonl，usageMetadata（Google 风格）。"
+}

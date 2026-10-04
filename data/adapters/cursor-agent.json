@@ -1,0 +1,50 @@
+{
+  "id": "cursor-agent",
+  "label": "cursor-agent",
+  "kind": "jsonl",
+  "paths": [
+    "{home}/.cursor/cli/**/*.jsonl",
+    "{home}/.cursor/chats/**/*.jsonl"
+  ],
+  "prefilter": [
+    "inputTokens",
+    "outputTokens",
+    "tokenCount"
+  ],
+  "require": [],
+  "dedup": [
+    "id",
+    "$file#$line"
+  ],
+  "fields": {
+    "model": [
+      "model",
+      "modelName"
+    ],
+    "session": [
+      "conversationId",
+      "sessionId",
+      "$dir"
+    ],
+    "time": [
+      "timestamp",
+      "updatedAt"
+    ],
+    "input": [
+      "inputTokens",
+      "tokenCount.inputTokens"
+    ],
+    "output": [
+      "outputTokens",
+      "tokenCount.outputTokens"
+    ],
+    "cacheRead": [
+      "cacheReadInputTokens",
+      "cachedInputTokens"
+    ],
+    "reasoning": [
+      "reasoningTokens"
+    ]
+  },
+  "note": "对齐 CodeBurn cursor-agent.ts：~/.cursor 下会话存储；protobuf 状态需专用解析（暂 JSONL）。"
+}

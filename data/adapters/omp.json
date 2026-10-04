@@ -1,0 +1,46 @@
+{
+  "id": "omp",
+  "label": "OMP (Oh My Pi)",
+  "kind": "jsonl",
+  "paths": [
+    "{home}/.omp/agent/sessions/**/*.jsonl"
+  ],
+  "prefilter": [
+    "\"usage\"",
+    "input_tokens"
+  ],
+  "require": [],
+  "dedup": [
+    "id",
+    "$file#$line"
+  ],
+  "fields": {
+    "model": [
+      "model"
+    ],
+    "session": [
+      "sessionId",
+      "$dir"
+    ],
+    "time": [
+      "timestamp"
+    ],
+    "input": [
+      "usage.input_tokens",
+      "usage.input"
+    ],
+    "output": [
+      "usage.output_tokens",
+      "usage.output"
+    ],
+    "cacheRead": [
+      "usage.cache_read_input_tokens",
+      "usage.cacheRead"
+    ],
+    "cacheWrite": [
+      "usage.cache_creation_input_tokens",
+      "usage.cacheWrite"
+    ]
+  },
+  "note": "对齐 CodeBurn pi.ts OMP 根：~/.omp/agent/sessions。"
+}

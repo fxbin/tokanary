@@ -1,0 +1,48 @@
+{
+  "id": "openclaw",
+  "label": "OpenClaw",
+  "kind": "jsonl",
+  "paths": [
+    "{home}/.openclaw/**/*.jsonl"
+  ],
+  "prefilter": [
+    "\"usage\"",
+    "cacheRead"
+  ],
+  "require": [],
+  "dedup": [
+    "id",
+    "$file#$line"
+  ],
+  "fields": {
+    "model": [
+      "modelId",
+      "message.model",
+      "data.modelId"
+    ],
+    "session": [
+      "sessionId",
+      "$dir"
+    ],
+    "time": [
+      "timestamp"
+    ],
+    "input": [
+      "message.usage.input",
+      "usage.input"
+    ],
+    "output": [
+      "message.usage.output",
+      "usage.output"
+    ],
+    "cacheRead": [
+      "message.usage.cacheRead",
+      "usage.cacheRead"
+    ],
+    "cacheWrite": [
+      "message.usage.cacheWrite",
+      "usage.cacheWrite"
+    ]
+  },
+  "note": "对齐 CodeBurn openclaw.ts：message.usage {input,output,cacheRead,cacheWrite}。"
+}

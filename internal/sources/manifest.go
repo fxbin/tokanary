@@ -21,6 +21,9 @@ type Manifest struct {
 	Query      string `json:"query"`
 	JSONColumn string `json:"json_column"`
 
+	// json kind: optional path of a nested array to flatten (e.g. "messages")
+	JSONRows string `json:"json_rows"`
+
 	Prefilter any            `json:"prefilter"`
 	Require   []string       `json:"require"`
 	Where     map[string]any `json:"where"`

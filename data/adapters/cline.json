@@ -3,23 +3,44 @@
   "label": "Cline",
   "kind": "json",
   "paths": [
-    "{home}/.cline/**/*.json",
-    "{home}/Library/Application Support/Cline/**/*.json",
-    "%APPDATA%/Cline/**/*.json",
-    "{home}/.vscode/extensions/saoudrizwan.claude-dev-*/**/*.json"
+    "{home}/.cline/data/**/*.json",
+    "{home}/.cline/data/**/api_conversation_history.json"
   ],
-  "prefilter": ["cacheReads", "cacheWrites", "inputTokens", "promptTokens"],
+  "prefilter": [
+    "cacheReads",
+    "inputTokens",
+    "prompt_tokens"
+  ],
   "require": [],
-  "where": {},
-  "dedup": ["id", "messageId", "$file#$line"],
+  "dedup": [
+    "id",
+    "$file#$line"
+  ],
   "fields": {
-    "model": ["model", "apiProvider.modelId"],
-    "session": ["taskId", "sessionId", "$dir"],
-    "time": ["timestamp", "ts"],
-    "input": ["inputTokens", "promptTokens", "usage.prompt_tokens"],
-    "output": ["outputTokens", "completionTokens", "usage.completion_tokens"],
-    "cacheRead": ["cacheReads", "cache_read_input_tokens"],
-    "cacheWrite": ["cacheWrites", "cache_creation_input_tokens"]
+    "model": [
+      "model"
+    ],
+    "session": [
+      "taskId",
+      "$dir"
+    ],
+    "time": [
+      "timestamp"
+    ],
+    "input": [
+      "inputTokens",
+      "promptTokens"
+    ],
+    "output": [
+      "outputTokens",
+      "completionTokens"
+    ],
+    "cacheRead": [
+      "cacheReads"
+    ],
+    "cacheWrite": [
+      "cacheWrites"
+    ]
   },
-  "note": "Cline / VS Code 扩展任务记录；字段名随版本变化，多路径回退。"
+  "note": "对齐 CodeBurn cline.ts：~/.cline/data 任务目录。"
 }

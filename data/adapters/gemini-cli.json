@@ -2,22 +2,52 @@
   "id": "gemini-cli",
   "label": "Gemini CLI",
   "kind": "json",
+  "json_rows": "messages",
   "paths": [
-    "{home}/.gemini/tmp/**/chats/*.json",
-    "{home}/.gemini/**/*.json"
+    "{home}/.gemini/tmp/*/chats/session-*.json",
+    "{home}/.gemini/tmp/*/chats/session-*.jsonl"
   ],
-  "prefilter": ["usageMetadata", "promptTokenCount", "candidatesTokenCount"],
-  "require": ["usageMetadata"],
-  "where": {},
-  "dedup": ["responseId", "$file#$line"],
+  "prefilter": [
+    "tokens",
+    "usageMetadata",
+    "promptTokenCount"
+  ],
+  "require": [
+    "tokens"
+  ],
+  "dedup": [
+    "id",
+    "$file#$line"
+  ],
   "fields": {
-    "model": ["modelVersion", "model"],
-    "session": ["$dir", "sessionId"],
-    "time": ["createTime", "timestamp"],
-    "input": ["usageMetadata.promptTokenCount", "usageMetadata.prompt_tokens"],
-    "output": ["usageMetadata.candidatesTokenCount", "usageMetadata.completion_tokens"],
-    "cacheRead": ["usageMetadata.cachedContentTokenCount", "usageMetadata.cached_tokens"],
-    "reasoning": ["usageMetadata.thoughtsTokenCount", "usageMetadata.reasoning_tokens"]
+    "model": [
+      "model",
+      "modelVersion"
+    ],
+    "session": [
+      "sessionId",
+      "$dir"
+    ],
+    "time": [
+      "timestamp",
+      "startTime"
+    ],
+    "input": [
+      "tokens.input",
+      "usageMetadata.promptTokenCount"
+    ],
+    "output": [
+      "tokens.output",
+      "usageMetadata.candidatesTokenCount"
+    ],
+    "cacheRead": [
+      "tokens.cached",
+      "usageMetadata.cachedContentTokenCount"
+    ],
+    "reasoning": [
+      "tokens.thoughts",
+      "usageMetadata.thoughtsTokenCount"
+    ]
   },
-  "note": "Gemini CLI 会话 JSON：usageMetadata 为 Google GenAI 计量；thoughtsTokenCount 若已含在 candidates 内会由 reasoning clamp 防止双计。"
+  "note": "对齐 CodeBurn gemini.ts：~/.gemini/tmp/*/chats/session-*.json，messages[].tokens {input,output,cached,thoughts}。"
 }
