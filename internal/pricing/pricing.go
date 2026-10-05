@@ -190,9 +190,43 @@ type PriceEntry struct {
 	Note       string      `json:"note,omitempty"`
 }
 
+// curatedIndex maps lowercase aliases (target + piIds) to the curated target key.
+// Codex/DSH report ids like Deepseek-v4-flash or GLM-5.2 that only hit
+// deepseek-v4-flash / zai-org/GLM-5.2 after case-fold + alias join.
+func curatedIndex(curated map[string]json.RawMessage) map[string]string {
+	idx := make(map[string]string, len(curated)*2)
+	for target, raw := range curated {
+		idx[strings.ToLower(target)] = target
+		if i := strings.LastIndex(target, "/"); i >= 0 {
+			idx[strings.ToLower(target[i+1:])] = target
+		}
+		var probe struct {
+			PiIDs []string `json:"piIds"`
+		}
+		if err := json.Unmarshal(raw, &probe); err == nil {
+			for _, p := range probe.PiIDs {
+				if p != "" {
+					idx[strings.ToLower(p)] = target
+				}
+			}
+		}
+	}
+	return idx
+}
+
+func lookupCurated(idx map[string]string, curated map[string]json.RawMessage, id string) (string, json.RawMessage, bool) {
+	for _, c := range KeyVariants(id) {
+		if target, ok := idx[strings.ToLower(c)]; ok {
+			return target, curated[target], true
+		}
+	}
+	return "", nil, false
+}
+
 // PriceModels resolves a unit price for every model id seen in the external
 // tool rows: curated models.dev table, then a free-tier rule, then unpriced.
 func PriceModels(rows []ToolUsage, curated map[string]json.RawMessage) map[string]PriceEntry {
+	idx := curatedIndex(curated)
 	out := map[string]PriceEntry{}
 	for _, t := range rows {
 		for mid, mm := range t.Models {
@@ -213,27 +247,21 @@ func PriceModels(rows []ToolUsage, curated map[string]json.RawMessage) map[strin
 				}
 				continue
 			}
-			base := ""
-			for _, c := range KeyVariants(mid) {
-				if _, ok := curated[c]; ok {
-					base = c
-					break
-				}
-			}
-			if base != "" {
+			base, rawEntry, ok := lookupCurated(idx, curated, mid)
+			if ok {
 				var ce struct {
 					Cost struct {
 						Input *float64 `json:"input"`
 					} `json:"cost"`
 				}
-				if err := json.Unmarshal(curated[base], &ce); err == nil && ce.Cost.Input != nil {
+				if err := json.Unmarshal(rawEntry, &ce); err == nil && ce.Cost.Input != nil {
 					var raw struct {
 						Target     string `json:"target"`
 						Provider   string `json:"provider"`
 						Confidence string `json:"confidence"`
 						Cost       Cost   `json:"cost"`
 					}
-					_ = json.Unmarshal(curated[base], &raw)
+					_ = json.Unmarshal(rawEntry, &raw)
 					out[mid] = PriceEntry{
 						Source: "models.dev", MatchedKey: nstr(base),
 						Provider: nstr(raw.Provider),
