@@ -8,8 +8,19 @@ export const RANGES: Record<RangeKey, { label: string; days: number | null }> = 
 }
 
 export function rangeAnchor(data: any): string | null {
-  const ds = (data.days || []).map(function (d: any) { return d.d }).sort()
-  return ds.length ? ds[ds.length - 1] : null
+  // Anchor must be the freshest day across ALL sources. pi warehouse may lag
+  // behind external tools (or vice versa); using only data.days clipped every
+  // newer external row out of the 7d/30d window.
+  let max: string | null = null
+  const take = (d: any) => {
+    const k = typeof d === 'string' ? d : d && d.d
+    if (typeof k === 'string' && k && (!max || k > max)) max = k
+  }
+  for (const d of data?.days || []) take(d)
+  for (const t of data?.external?.tools || []) {
+    for (const d of t.days || []) take(d)
+  }
+  return max
 }
 
 /** 返回 cutoff 日历日(YYYY-MM-DD);null 表示不过滤 */

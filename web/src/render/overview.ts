@@ -31,8 +31,9 @@ export function renderOverview(data: any, st: UiState, cmp: Record<string, numbe
     { label: '单日最低', value: money(rs.minCost), sub: rs.minDay || '—' },
     { label: '缓存命中率', value: pct(rs.cacheHitPct), sub: '范围内缓存读占比' }
   ]
-  /* streak: 连续活跃天(全量 days,锚 = 数据最大日;与 range 无关) */
-  const stk = calcStreak(data.days || [], anchor)
+  // streak / week-top: pi day series only — use that series last day
+  const piLast = ((data.days || []) as any[]).map((d: any) => d.d).filter(Boolean).sort().pop() || anchor
+  const stk = calcStreak(data.days || [], piLast)
   hero.push({
     label: '连续活跃', value: stk.streak > 0 ? stk.streak + ' 天' : '—',
     sub: stk.endDate ? '至 ' + stk.endDate : '断档或暂无数据'
@@ -90,7 +91,7 @@ export function renderOverview(data: any, st: UiState, cmp: Record<string, numbe
   html.push('</section>')
 
   /* 本周 Top 模型(U6):数据最大日所在 ISO 周(周一起) */
-  const weekTop = weekTopModels(data, s, anchor)
+  const weekTop = weekTopModels(data, s, piLast)
   const weekStartNote = (function () {
     if (!anchor) return ''
     const t = new Date(anchor + 'T00:00:00').getTime()

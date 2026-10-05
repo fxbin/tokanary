@@ -81,9 +81,16 @@ describe('range aggregation', () => {
     const all = rangeStats(DATA, s, byDay, 'all')
     expect(all.tokens).toBe(DATA.totals.total)
     near(all.cost, Object.keys(byDay).reduce((t, k) => t + byDay[k], 0))
+    // today 以多源最新日为锚；pi 序列若过期则今天为 0 是正确行为
     const today = rangeStats(DATA, s, byDay, 'today')
-    expect(today.dayCount).toBe(1)
-    expect(today.tokens).toBeGreaterThan(0)
+    const a = rangeAnchor(DATA)
+    const hasToday = ((DATA.days || []) as any[]).some((d: any) => d.d === a && d.total > 0)
+    if (hasToday) {
+      expect(today.dayCount).toBe(1)
+      expect(today.tokens).toBeGreaterThan(0)
+    } else {
+      expect(today.dayCount).toBe(0)
+    }
   })
 
   itLive('总览冒烟:hero 金额一致 + 跨工具 + 无泄漏', () => {
@@ -203,8 +210,8 @@ describe('U3 models tab', () => {
     expect(html).toContain('模型明细与单价')
     expect(html).toContain('data-field=')
     expect(html).toContain('data-key=')
-    expect(html).toContain('<svg')
     expect(html).toContain('范围内 Token')
+    if (!html.includes('当前范围内没有模型用量')) expect(html).toContain('<svg')
     expect(html).not.toMatch(/NaN/)
     expect(html).not.toMatch(/>undefined</)
   })
@@ -514,8 +521,8 @@ describe('U6 streak', () => {
   })
 
   itLive('真实 data.js: streak ≥1(有活跃日)且 endDate 非空', () => {
-    const a = rangeAnchor(DATA)
-    const s = calcStreak(DATA.days || [], a)
+    const piLast = ((DATA.days || []) as any[]).map((d: any) => d.d).filter(Boolean).sort().pop()
+    const s = calcStreak(DATA.days || [], piLast)
     expect(s.streak).toBeGreaterThanOrEqual(1)
     expect(s.endDate).toBeTruthy()
   })
@@ -630,5 +637,23 @@ describe('glass contract (slice2)', () => {
     expect(n).toBeLessThanOrEqual(36)
     // 中性 fg 洗色必须全部 token 化(禁新增内联 color-mix fg)
     expect(css).not.toMatch(/color-mix\(in srgb, var\(--fg\)/)
+  })
+})
+
+describe("rangeAnchor across sources", () => {
+  it("uses freshest day from pi + external, not only pi", () => {
+    const data = {
+      days: [{ d: "2026-09-20", total: 10 }],
+      external: {
+        tools: [
+          { days: [{ d: "2026-10-04", total: 1 }] },
+          { days: [{ d: "2026-10-05", total: 2 }] }
+        ]
+      }
+    }
+    expect(rangeAnchor(data)).toBe("2026-10-05")
+  })
+  it("still works with pi-only data", () => {
+    expect(rangeAnchor({ days: [{ d: "2026-09-20" }] })).toBe("2026-09-20")
   })
 })
