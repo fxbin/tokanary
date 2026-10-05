@@ -10,6 +10,7 @@ import {
 import { renderOverview, renderModels, renderSessions, renderProjects, renderSettings, budgetAlertHtml, defaultUiState } from './render'
 import { heatmap, MODEL_COLORS } from './charts'
 import { CATS } from './pricing'
+import { mergeDailyUsage } from './range'
 import { loadDashboardFixture } from './testsupport'
 
 const DATA = loadDashboardFixture()
