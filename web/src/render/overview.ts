@@ -1,7 +1,7 @@
 import {
   fmt, money, pct, esc, CATS, POLICIES, SOURCES,
   normalizeCost, costOfTokens, computeAll, compareSources,
-  dailyCost, externalSummary, rangeStats, rangeExt, rangeAnchor,
+  dailyCost, externalSummary, rangeStats, rangeExt, rangeAnchor, withMergedDays, mergeDailyCost,
   filterHoursByRange, hourMatrix, rangeInsights, RANGES,
   filterDaysByRange, rangeCutoffKey, calcStreak, weekTopModels,
   type PricingOpts, type PriceSource, type RangeKey
@@ -14,9 +14,10 @@ export function renderOverview(data: any, st: UiState, cmp: Record<string, numbe
     return '<div class="empty">没有用量数据 —— 请先运行 <code>tokanary refresh</code> 重建仓库。</div>'
   }
   const s = computeAll(data, st)
-  const costByDay = dailyCost(data, s)
-  const rs = rangeStats(data, s, costByDay, range)
   const ext = externalSummary(data, st.policy)
+  const merged = withMergedDays(data)
+  const costByDay = mergeDailyCost(dailyCost(data, s), ext, data)
+  const rs = rangeStats(merged, s, costByDay, range)
   const re = rangeExt(ext, range, rangeAnchor(data))
   const html: string[] = []
   const rangeLabel = (RANGES[range] || RANGES.all).label

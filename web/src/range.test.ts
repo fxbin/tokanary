@@ -657,3 +657,17 @@ describe("rangeAnchor across sources", () => {
     expect(rangeAnchor({ days: [{ d: "2026-09-20" }] })).toBe("2026-09-20")
   })
 })
+
+describe("mergeDailyUsage", () => {
+  it("sums pi + external days for the chart", () => {
+    const data = {
+      days: [{ d: "2026-09-20", total: 10, input: 1, output: 2, cacheRead: 3, cacheWrite: 4 }],
+      external: { tools: [{ days: [{ d: "2026-10-05", total: 100, input: 10, output: 20, cacheRead: 30, cacheWrite: 40 }] }] }
+    }
+    const m = mergeDailyUsage(data)
+    expect(m.length).toBe(2)
+    expect(m[0].d).toBe("2026-09-20")
+    expect(m[1].d).toBe("2026-10-05")
+    expect(m[1].total).toBe(100)
+  })
+})

@@ -47,6 +47,69 @@ export function filterDaysByRange(days: any[], range: RangeKey, anchor?: string 
 
 export interface DayFields { cacheRead: number; cacheWrite: number; input: number; output: number; total: number }
 
+/**
+ * 合并 pi 仓库 days 与各 external 工具 days，得到「全工具」逐日序列。
+ * 主图/近 N 天 KPI 必须用这个，否则 pi 过期时窗口会整段空掉。
+ */
+export function mergeDailyUsage(data: any): any[] {
+  const byDay: Record<string, any> = {}
+  const bump = (key: string, src: any) => {
+    if (!key) return
+    let e = byDay[key]
+    if (!e) {
+      e = byDay[key] = { d: key, cacheRead: 0, cacheWrite: 0, input: 0, output: 0, total: 0, reasoning: 0 }
+    }
+    e.cacheRead += Number(src.cacheRead || src.cache_read || 0)
+    e.cacheWrite += Number(src.cacheWrite || src.cache_write || 0)
+    e.input += Number(src.input || 0)
+    e.output += Number(src.output || 0)
+    e.reasoning += Number(src.reasoning || 0)
+    const t = Number(src.total || 0)
+    e.total += t || (Number(src.input || 0) + Number(src.output || 0) + Number(src.cacheRead || src.cache_read || 0) + Number(src.cacheWrite || src.cache_write || 0))
+  }
+  for (const d of data?.days || []) {
+    if (d && d.d) bump(String(d.d), d)
+  }
+  for (const t of data?.external?.tools || []) {
+    for (const d of t.days || []) {
+      if (d && d.d) bump(String(d.d), d)
+    }
+  }
+  return Object.keys(byDay).sort().map((k) => byDay[k])
+}
+
+/** 合并 pi 日费用与 external 日费用（external 按该工具综合均价摊到天）。 */
+export function mergeDailyCost(
+  costByDay: Record<string, number>,
+  extSummary: { rows: any[]; totalTokens?: number; totalCost?: number } | null,
+  data: any
+): Record<string, number> {
+  const out: Record<string, number> = { ...costByDay }
+  if (!extSummary) return out
+  const tools = data?.external?.tools || []
+  const rows = extSummary.rows || []
+  rows.forEach((r: any, i: number) => {
+    const t = tools[i]
+    // match by label when possible
+    const tool = tools.find((x: any) => x.label === r.label || x.tool === r.label) || t
+    if (!tool) return
+    const unit = r.unit || 0
+    for (const d of tool.days || []) {
+      if (!d || !d.d) continue
+      const tok = Number(d.total || 0) ||
+        Number(d.input || 0) + Number(d.output || 0) + Number(d.cacheRead || 0) + Number(d.cacheWrite || 0)
+      out[d.d] = (out[d.d] || 0) + unit * tok / 1e6
+    }
+  })
+  return out
+}
+
+/** 装配「全工具」视图：days 合并后可直接喂 rangeStats / dayChart。 */
+export function withMergedDays(data: any): any {
+  return { ...data, days: mergeDailyUsage(data) }
+}
+
+
 export function sumDayFields(days: any[]): DayFields {
   const f: DayFields = { cacheRead: 0, cacheWrite: 0, input: 0, output: 0, total: 0 }
   days.forEach(function (d: any) {
