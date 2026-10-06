@@ -8,7 +8,6 @@ import {
 } from '../pricing'
 import { MODEL_COLORS, stackBar, donut, legend, dayChart, heatmap, trimNum } from '../charts'
 import { loadQuotas, computeQuotas, quotaPct, type QuotaUsage } from '../quota'
-import { loadQuotas, computeQuotas, quotaPct, type QuotaUsage } from '../quota'
 import { th, sourceTag, stableColorIndex, sesRecency, pad2, localDay, type UiState } from './shared'
 
 export function renderOverview(data: any, st: UiState, cmp: Record<string, number>, range: RangeKey): string {
