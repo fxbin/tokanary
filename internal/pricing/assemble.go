@@ -328,4 +328,5 @@ type DashboardPayload struct {
 	Pricing      map[string]json.RawMessage `json:"pricing"`
 	PricingMeta  PricingMeta                `json:"pricingMeta"`
 	External     *External                  `json:"external"`
+	Yield        any                        `json:"yield"`
 }

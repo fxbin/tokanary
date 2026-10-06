@@ -82,6 +82,24 @@ export function renderOverview(data: any, st: UiState, cmp: Record<string, numbe
     }
   }
 
+  /* 产出 · git（Yield） */
+  {
+    const ys = (data as any).yield
+    if (Array.isArray(ys) && ys.length) {
+      html.push('<section class="card"><h2>产出 · git <span class="hint">本地仓库 commit · 对照用量日</span></h2>')
+      html.push('<div class="tbl-wrap"><table class="tbl"><thead><tr><th>项目</th><th>提交</th><th>最近提交</th></tr></thead><tbody>')
+      ys.slice().sort(function (a: any, b: any) { return (b.total || 0) - (a.total || 0) }).forEach(function (y: any) {
+        const days = (y.days || []).slice().sort(function (a: any, b: any) { return a.d < b.d ? 1 : -1 })
+        const last = days[0]
+        html.push('<tr><td class="mname"><b>' + esc(y.project) + '</b><div class="raw">' + esc(y.root || '') + '</div></td>' +
+          '<td class="num strong">' + fmt(y.total || 0) + '</td>' +
+          '<td class="num">' + esc(last ? (last.d + (last.subjects && last.subjects[0] ? ' · ' + last.subjects[0] : '')) : '—') + '</td></tr>')
+      })
+      html.push('</tbody></table></div>')
+      html.push('</section>')
+    }
+  }
+
   /* 趋势(范围过滤) */
   html.push('<section class="card">')
   html.push('<h2>' + esc(rangeLabel) + ' Token 与费用 <span class="hint">柱 = token（按 4 类拆分）；折线 = 当日估算费用（按各模型均价摊算）</span></h2>')
@@ -102,7 +120,27 @@ export function renderOverview(data: any, st: UiState, cmp: Record<string, numbe
     { label: '日均 burn', value: money(ins.avgBurn), sub: '按 ' + ins.dayCount + ' 个活跃日' },
     { label: '月末预测', value: money(ins.forecast30), sub: '日均 × 30（示意，非结算）' }
   ]
-  html.push('<section class="card insights">')
+    /* Optimize · 浪费提示 */
+  {
+    const tips: string[] = []
+    const hit = rs.cacheHitPct || 0
+    if (rs.tokens > 0 && hit < 20) {
+      tips.push('缓存命中仅 ' + pct(hit) + '：重复长上下文较多，可减少新开会话或压缩 system/工具说明。')
+    }
+    if (rs.maxCost > 0 && rs.avgCost > 0 && rs.maxCost > rs.avgCost * 3) {
+      tips.push('单日峰值 ' + money(rs.maxCost) + ' 约为日均 ' + money(rs.avgCost) + ' 的 ' + (rs.maxCost / rs.avgCost).toFixed(1) + ' 倍，检查是否有空转或批量任务。')
+    }
+    const unpriced = (s as any).unpriced || []
+    if (unpriced.length) {
+      tips.push(unpriced.length + ' 个模型未匹配单价，涉及 ' + fmt((s as any).unpricedTokens || 0) + ' token 未计入金额。')
+    }
+    if (tips.length) {
+      html.push('<section class="card"><h2>优化提示 <span class="hint">Optimize · 确定性启发式</span></h2><ul class="tips">')
+      tips.forEach(function (t) { html.push('<li>' + esc(t) + '</li>') })
+      html.push('</ul></section>')
+    }
+  }
+html.push('<section class="card insights">')
   html.push('<h2>洞察 <span class="hint">' + esc(rangeLabel) + ' · 随口径与范围实时变</span></h2>')
   html.push('<div class="ins-row">' + insItems.map(function (k) {
     return '<div class="ins"><div class="ins-l">' + esc(k.label) +

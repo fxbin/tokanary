@@ -285,3 +285,6 @@ footer.foot { max-width: 1360px; margin: 8px auto 0; color: var(--dim); font-siz
 .q-bar b{display:block;height:100%;background:var(--qing);border-radius:5px}
 .q-pct{text-align:right;font-variant-numeric:tabular-nums;font-weight:600;color:var(--accent-ink)}
 .q-val{text-align:right;font-family:Menlo,monospace;font-size:11px;color:var(--dim);font-variant-numeric:tabular-nums}
+
+.tips{margin:0;padding-left:18px;color:var(--t2)}
+.tips li{margin:6px 0;font-size:13px;line-height:1.55}

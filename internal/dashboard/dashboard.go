@@ -14,6 +14,7 @@ import (
 
 	"github.com/fxbin/tokanary/internal/pricing"
 	"github.com/fxbin/tokanary/internal/warehouse"
+	"github.com/fxbin/tokanary/internal/yield"
 )
 
 // DefaultDBPath is the analysis store under .cache/.
@@ -194,6 +195,7 @@ func AssembleFromUsage(opt Options, usage *warehouse.Usage, cliStats map[string]
 		Pricing:      pricingMap,
 		PricingMeta:  pricingMeta,
 		External:     external,
+		Yield:        yield.ProjectGit(yield.DiscoverRoots(home)),
 	}
 	return payload, nil
 }
