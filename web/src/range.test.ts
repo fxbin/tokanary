@@ -238,7 +238,7 @@ describe('U3 models tab', () => {
   itLive('空范围:无范围内用量降级文案,不崩', () => {
     const st = defaultUiState()
     const cmp = compareSources(DATA, st)
-    const emptyData = { ...DATA, days: [], dayModel: [] }
+    const emptyData = { ...DATA, days: [], dayModel: [], models: [], external: null }
     const html = renderModels(emptyData, st, cmp, '7d')
     expect(html).toContain('没有模型用量')
     expect(html).not.toMatch(/NaN/)

@@ -9,7 +9,10 @@ import {
 import { MODEL_COLORS, stackBar, donut, legend, dayChart, heatmap, trimNum } from '../charts'
 import { th, sourceTag, stableColorIndex, sesRecency, pad2, localDay, type UiState } from './shared'
 
-/** 范围内按 model key 聚合 dayModel(与 rangeStats 同锚)。返回 key → {total, fields} */
+/**
+ * 范围内按 model key 聚合：pi 的 dayModel 精确 + external 各工具按
+ * 「工具日合计 × 该模型占比」近似（external 无 per-model day 明细）。
+ */
 function rangeModelAgg(data: any, range: RangeKey): Record<string, { total: number; fields: any }> {
   const anchor = rangeAnchor(data)
   const fdays = filterDaysByRange(data.days || [], range, anchor)
@@ -34,6 +37,35 @@ function rangeModelAgg(data: any, range: RangeKey): Record<string, { total: numb
     e.fields.input = Math.round((m.input || 0) * scale)
     e.fields.output = Math.round((m.output || 0) * scale)
   })
+  // external: 无 per-model 日拆，按工具范围 token × 模型占比近似
+  for (const t of data?.external?.tools || []) {
+    const tdays = filterDaysByRange(t.days || [], range, anchor)
+    let rangeTok = 0
+    for (const d of tdays) {
+      rangeTok += Number(d.total || 0) ||
+        Number(d.input || 0) + Number(d.output || 0) + Number(d.cacheRead || 0) + Number(d.cacheWrite || 0)
+    }
+    if (rangeTok <= 0) continue
+    const models = t.models || []
+    let allTok = 0
+    for (const m of models) allTok += Number(m.total || 0)
+    if (allTok <= 0) continue
+    for (const m of models) {
+      const share = Number(m.total || 0) / allTok
+      const tok = Math.round(rangeTok * share)
+      if (tok <= 0) continue
+      let e = out[m.id]
+      if (!e) {
+        e = out[m.id] = { total: 0, fields: { cacheRead: 0, cacheWrite: 0, input: 0, output: 0 } }
+      }
+      const scale = Number(m.total || 0) ? share : 1
+      e.total += tok
+      e.fields.cacheRead += Math.round(Number(m.cacheRead || 0) * scale * (rangeTok / allTok))
+      e.fields.cacheWrite += Math.round(Number(m.cacheWrite || 0) * scale * (rangeTok / allTok))
+      e.fields.input += Math.round(Number(m.input || 0) * scale * (rangeTok / allTok))
+      e.fields.output += Math.round(Number(m.output || 0) * scale * (rangeTok / allTok))
+    }
+  }
   return out
 }
 
@@ -47,31 +79,62 @@ export function renderModels(data: any, st: UiState, cmp: Record<string, number>
   const rs = rangeStats(data, s, costByDay, range)
   const rangeLabel = (RANGES[range] || RANGES.all).label
   const agg = rangeModelAgg(data, range)
-  const colorIdx = stableColorIndex((data.models || []).map(function (m: any) { return m.key }))
+
+  // 合并 pi + external 模型宇宙（external 可能有 pi 没有的 key）
+  type MRow = { key: string; total: number; turns: number; cacheRead: number; cacheWrite: number; input: number; output: number; unit: number; source: string }
+  const piRows: MRow[] = s.rows.map(function (r: any) {
+    return {
+      key: r.m.key, total: r.m.total, turns: r.m.turns,
+      cacheRead: r.m.cacheRead, cacheWrite: r.m.cacheWrite, input: r.m.input, output: r.m.output,
+      unit: r.unit || 0, source: r.price && r.price.source || 'missing'
+    }
+  })
+  const piKeySet = new Set(piRows.map(function (r) { return r.key }))
+  const extMeta: Record<string, { unit: number; source: string }> = {}
+  for (const t of data?.external?.tools || []) {
+    const prices = (data.external && data.external.prices) || {}
+    for (const m of t.models || []) {
+      const key = String(m.id)
+      const pr = prices[key] || {}
+      const cost = pr.cost || {}
+      const unit = ((cost.input || 0) + (cost.output || 0) + (cost.cache_read || 0) + (cost.cache_write || 0)) / 4
+      extMeta[key] = { unit: unit || 0, source: pr.source || 'missing' }
+      if (!piKeySet.has(key)) {
+        piRows.push({
+          key, total: Number(m.total || 0), turns: 0,
+          cacheRead: Number(m.cacheRead || 0), cacheWrite: Number(m.cacheWrite || 0),
+          input: Number(m.input || 0), output: Number(m.output || 0),
+          unit: unit || 0, source: pr.source || 'missing'
+        })
+      }
+    }
+  }
+
+  const colorIdx = stableColorIndex(piRows.map(function (m) { return m.key }))
   const colorOf = function (key: string) {
     return MODEL_COLORS[(colorIdx[key] || 0) % MODEL_COLORS.length]
   }
 
-  /* 堆叠条:按范围内 token 降序(无 dayModel 命中则回退全量 total) */
-  const stackRows = s.rows.map(function (r: any) {
-    const a = agg[r.m.key]
+  /* 堆叠条:按范围内 token 降序 */
+  const stackRows = piRows.map(function (m: MRow) {
+    const a = agg[m.key]
     const total = a ? a.total : 0
     const f = (a && a.fields) || { cacheRead: 0, cacheWrite: 0, input: 0, output: 0 }
     return {
-      label: r.m.key,
-      sub: (a ? '范围内 ' + fmt(total) : '范围内 0') + ' · 全量 ' + fmt(r.m.total),
+      label: m.key,
+      sub: (a ? '范围内 ' + fmt(total) : '范围内 0') + ' · 全量 ' + fmt(m.total),
       total, totalText: fmt(total),
       segments: CATS.map(function (c) { return { v: (f as any)[c.k] || 0, color: c.color, name: c.label } })
     }
   }).filter(function (x: any) { return x.total > 0 })
   stackRows.sort(function (a: any, b: any) { return b.total - a.total })
 
-  /* donut:费用按范围内 dayModel token × 该模型全量综合均价(与 dailyCost 同法) */
-  const costItems = s.rows.map(function (r: any) {
-    const a = agg[r.m.key]
+  /* donut:范围内 token × 综合均价 */
+  const costItems = piRows.map(function (m: MRow) {
+    const a = agg[m.key]
     const tokens = a ? a.total : 0
-    const cost = r.unit * tokens / 1e6
-    return { label: r.m.key, value: cost, color: colorOf(r.m.key) }
+    const cost = m.unit * tokens / 1e6
+    return { label: m.key, value: cost, color: colorOf(m.key) }
   }).filter(function (x: any) { return x.value > 0 })
   costItems.sort(function (a: any, b: any) { return b.value - a.value })
 
@@ -120,13 +183,13 @@ export function renderModels(data: any, st: UiState, cmp: Record<string, number>
   const sortKey = st.sortKey, dir = st.sortDir
   const tableRows = s.rows.slice().sort(function (a: any, b: any) {
     let va: any, vb: any
-    if (sortKey === 'key') { va = a.m.key; vb = b.m.key; return va < vb ? -dir : va > vb ? dir : 0 }
+    if (sortKey === 'key') { va = a.key; vb = b.key; return va < vb ? -dir : va > vb ? dir : 0 }
     if (sortKey === 'cost') { va = a.cost; vb = b.cost }
-    else if (sortKey === 'turns') { va = a.m.turns; vb = b.m.turns }
+    else if (sortKey === 'turns') { va = a.turns; vb = b.turns }
     else if (sortKey === 'rTotal') {
       va = (agg[a.m.key] || {}).total || 0
       vb = (agg[b.m.key] || {}).total || 0
-    } else { va = a.m[sortKey] || 0; vb = b.m[sortKey] || 0 }
+    } else { va = (a.m as any)[sortKey] || 0; vb = (b.m as any)[sortKey] || 0 }
     return (va - vb) * dir
   })
 
