@@ -8,6 +8,7 @@ import {
 } from '../pricing'
 import { MODEL_COLORS, stackBar, donut, legend, dayChart, heatmap, trimNum } from '../charts'
 import { loadQuotas, computeQuotas, quotaPct, type QuotaUsage } from '../quota'
+import { aggregateCats, TASK_CATS } from '../categories'
 import { th, sourceTag, stableColorIndex, sesRecency, pad2, localDay, type UiState } from './shared'
 
 export function renderOverview(data: any, st: UiState, cmp: Record<string, number>, range: RangeKey): string {
@@ -79,6 +80,32 @@ export function renderOverview(data: any, st: UiState, cmp: Record<string, numbe
           '<div class="q-val">' + fmt(q.tokens) + ' tok · ' + money(q.cost) + '</div></div>')
       })
       html.push('</section>')
+    }
+  }
+
+  /* 任务类别 */
+  {
+    const rows = ((data.sessions || []) as any[]).map(function (x) {
+      return { title: (x.title || '') + ' ' + (x.project || ''), tool: 'pi', tokens: x.total || 0 }
+    })
+    for (const t of data?.external?.tools || []) {
+      for (const m of t.models || []) {
+        // 无会话标题时按工具归入 coding，token 计入
+        rows.push({ title: '', tool: t.tool || t.label, tokens: Number(m.total || 0) })
+      }
+    }
+    const cats = aggregateCats(rows)
+    if (cats.length) {
+      html.push('<section class="card"><h2>任务类别 <span class="hint">启发式 · 会话标题/工具词表</span></h2>')
+      html.push('<div class="stack">')
+      const max = Math.max.apply(null, cats.map(function (c) { return c.tokens || c.count })) || 1
+      cats.forEach(function (c) {
+        const v = c.tokens || c.count
+        html.push('<div class="srow"><div class="lbl">' + esc(c.label) + '</div>' +
+          '<div class="bar"><span style="width:' + (v / max * 100).toFixed(1) + '%;background:var(--qing)"></span></div>' +
+          '<div class="val">' + fmt(c.tokens) + '</div><div class="pct">' + c.count + ' 项</div></div>')
+      })
+      html.push('</div></section>')
     }
   }
 

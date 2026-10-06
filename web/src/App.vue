@@ -244,29 +244,19 @@ const srcLine = computed(() => {
   const m = (dataRef.value || {}).meta
   if (!m) return ''
   const e = (s: unknown) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;')
-  const parts: string[] = []
-  const source = m.sourceNote || m.piDir
-  const store = m.dbPath
-  if (source && store && source !== store) {
-    parts.push('数据源：<code>' + e(source) + '</code> · <code>' + e(store) + '</code>')
-  } else {
-    parts.push('数据源：<code>' + e(source || store || '—') + '</code>')
-  }
-  if (m.rangeStart || m.rangeEnd) {
-    parts.push('区间 ' + e(m.rangeStart || '—') + ' ~ ' + e(m.rangeEnd || '—'))
-  }
-  if (m.generatedAt) parts.push('生成于 ' + e(m.generatedAt))
-  return parts.join(' · ')
+  const source = m.sourceNote || m.piDir || '本地仓库'
+  const range = (m.rangeStart && m.rangeEnd)
+    ? '数据 ' + e(String(m.rangeStart).slice(0, 10)) + ' ~ ' + e(String(m.rangeEnd).slice(0, 10))
+    : ''
+  return [e(source), range].filter(Boolean).join(' · ')
 })
 
 const topSub = computed(() => {
   const m = (dataRef.value || {}).meta
   if (!m) return ''
   const e = (s: unknown) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;')
-  const bits: string[] = []
-  if (m.rangeStart || m.rangeEnd) bits.push('区间 ' + e(m.rangeStart || '—') + ' ~ ' + e(m.rangeEnd || '—'))
-  if (m.generatedAt) bits.push('生成于 ' + e(m.generatedAt))
-  return bits.join(' · ')
+  const g = m.generatedAt ? e(String(m.generatedAt).replace('T', ' ').slice(0, 16)) : ''
+  return g ? '更新于 ' + g : ''
 })
 </script>
 

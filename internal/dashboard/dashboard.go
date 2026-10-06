@@ -80,6 +80,47 @@ func Assemble(opt Options) (*pricing.DashboardPayload, error) {
 
 // AssembleFromUsage builds the payload from an already-exported usage block.
 // build/refresh use this after ingesting sources into the warehouse.
+
+// spanRange returns the earliest/latest day across pi days and external tool days.
+func spanRange(payload *pricing.DashboardPayload) (start, end string) {
+	day := func(v any) string {
+		switch t := v.(type) {
+		case string:
+			if len(t) >= 10 {
+				return t[:10]
+			}
+			return t
+		}
+		return ""
+	}
+	take := func(d string) {
+		if d == "" {
+			return
+		}
+		if start == "" || d < start {
+			start = d
+		}
+		if end == "" || d > end {
+			end = d
+		}
+	}
+	if list, ok := payload.Days.([]any); ok {
+		for _, it := range list {
+			if m, ok := it.(map[string]any); ok {
+				take(day(m["d"]))
+			}
+		}
+	}
+	if payload.External != nil {
+		for _, t := range payload.External.Tools {
+			for _, d := range t.Days {
+				take(day(d.D))
+			}
+		}
+	}
+	return start, end
+}
+
 func AssembleFromUsage(opt Options, usage *warehouse.Usage, cliStats map[string]string) (*pricing.DashboardPayload, error) {
 	root := opt.RepoRoot
 	pricesPath := opt.PricesPath
@@ -196,6 +237,10 @@ func AssembleFromUsage(opt Options, usage *warehouse.Usage, cliStats map[string]
 		PricingMeta:  pricingMeta,
 		External:     external,
 		Yield:        yield.ProjectGit(yield.DiscoverRoots(home)),
+	}
+	if rs, re := spanRange(payload); rs != "" {
+		payload.Meta.RangeStart = rs
+		payload.Meta.RangeEnd = re
 	}
 	return payload, nil
 }
