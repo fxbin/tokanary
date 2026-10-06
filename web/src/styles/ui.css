@@ -275,3 +275,13 @@ footer.foot { max-width: 1360px; margin: 8px auto 0; color: var(--dim); font-siz
   .tag-miss { background: color-mix(in srgb, var(--err) 20%, var(--card)); }
   .proj-row, .ins, .tool-card { background: var(--wash-2); }
 }
+
+/* 限额条 */
+.quota-row{display:grid;grid-template-columns:110px 1fr 48px 160px;gap:10px;align-items:center;padding:8px 0;border-bottom:1px solid var(--line)}
+.quota-row:last-child{border-bottom:0}
+.q-label{font-weight:600;font-size:13px}
+.q-win{margin-left:8px;font-size:11px;color:var(--dim);font-weight:400}
+.q-bar{height:10px;background:var(--sunken);border-radius:5px;overflow:hidden;border:1px solid var(--line)}
+.q-bar b{display:block;height:100%;background:var(--qing);border-radius:5px}
+.q-pct{text-align:right;font-variant-numeric:tabular-nums;font-weight:600;color:var(--accent-ink)}
+.q-val{text-align:right;font-family:Menlo,monospace;font-size:11px;color:var(--dim);font-variant-numeric:tabular-nums}

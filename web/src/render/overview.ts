@@ -7,6 +7,8 @@ import {
   type PricingOpts, type PriceSource, type RangeKey
 } from '../pricing'
 import { MODEL_COLORS, stackBar, donut, legend, dayChart, heatmap, trimNum } from '../charts'
+import { loadQuotas, computeQuotas, quotaPct, type QuotaUsage } from '../quota'
+import { loadQuotas, computeQuotas, quotaPct, type QuotaUsage } from '../quota'
 import { th, sourceTag, stableColorIndex, sesRecency, pad2, localDay, type UiState } from './shared'
 
 export function renderOverview(data: any, st: UiState, cmp: Record<string, number>, range: RangeKey): string {
@@ -62,6 +64,24 @@ export function renderOverview(data: any, st: UiState, cmp: Record<string, numbe
     return '<div class="kpi"><div class="kpi-l">' + esc(k.label) +
       '</div><div class="kpi-v">' + esc(k.value) + '</div><div class="kpi-s">' + esc(k.sub) + '</div></div>'
   }).join('') + heroSpark + '</section>')
+
+  /* 限额 · 已用 */
+  {
+    const quotas = computeQuotas(data, loadQuotas())
+    const visible = quotas.filter(function (q: QuotaUsage) { return quotaPct(q) !== null || q.tokens > 0 })
+    if (visible.length) {
+      html.push('<section class="card"><h2>限额 · 已用 <span class="hint">套餐窗口内用量 / 额度</span></h2>')
+      visible.forEach(function (q: QuotaUsage) {
+        const p = quotaPct(q)
+        html.push('<div class="quota-row"><div class="q-label">' + esc(q.plan.label) +
+          '<span class="q-win">' + esc(q.plan.window) + '</span></div>' +
+          '<div class="q-bar"><b style="width:' + (p === null ? 0 : Math.min(100, p)).toFixed(1) + '%"></b></div>' +
+          '<div class="q-pct">' + (p === null ? '—' : Math.round(p) + '%') + '</div>' +
+          '<div class="q-val">' + fmt(q.tokens) + ' tok · ' + money(q.cost) + '</div></div>')
+      })
+      html.push('</section>')
+    }
+  }
 
   /* 趋势(范围过滤) */
   html.push('<section class="card">')
