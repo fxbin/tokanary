@@ -313,21 +313,21 @@ func formatRange(v any) any {
 
 // DashboardPayload is the full dashboard JSON payload.
 type DashboardPayload struct {
-	Meta         Meta                       `json:"meta"`
-	Totals       any                        `json:"totals"`
-	Models       []ModelListRow             `json:"models"`
-	Days         any                        `json:"days"`
-	DayModel     any                        `json:"dayModel"`
-	Hours        any                        `json:"hours"`
-	Projects     any                        `json:"projects"`
-	Sessions     any                        `json:"sessions"`
-	SessionsAll  any                        `json:"sessionsAll"`
-	SessionCount any                        `json:"sessionCount"`
-	Roles        any                        `json:"roles"`
-	Tools        any                        `json:"tools"`
-	Pricing      map[string]json.RawMessage `json:"pricing"`
-	PricingMeta  PricingMeta                `json:"pricingMeta"`
-	External     *External                  `json:"external"`
-	Yield        any                        `json:"yield"`
-	TaskCategories any                      `json:"taskCategories,omitempty"`
+	Meta           Meta                       `json:"meta"`
+	Totals         any                        `json:"totals"`
+	Models         []ModelListRow             `json:"models"`
+	Days           any                        `json:"days"`
+	DayModel       any                        `json:"dayModel"`
+	Hours          any                        `json:"hours"`
+	Projects       any                        `json:"projects"`
+	Sessions       any                        `json:"sessions"`
+	SessionsAll    any                        `json:"sessionsAll"`
+	SessionCount   any                        `json:"sessionCount"`
+	Roles          any                        `json:"roles"`
+	Tools          any                        `json:"tools"`
+	Pricing        map[string]json.RawMessage `json:"pricing"`
+	PricingMeta    PricingMeta                `json:"pricingMeta"`
+	External       *External                  `json:"external"`
+	Yield          any                        `json:"yield"`
+	TaskCategories any                        `json:"taskCategories,omitempty"`
 }

@@ -12,9 +12,9 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/fxbin/tokanary/internal/ai"
 	"github.com/fxbin/tokanary/internal/pricing"
 	"github.com/fxbin/tokanary/internal/warehouse"
-	"github.com/fxbin/tokanary/internal/ai"
 	"github.com/fxbin/tokanary/internal/yield"
 )
 

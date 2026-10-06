@@ -13,8 +13,8 @@ import (
 
 // DayCommits is one calendar day of git activity in a workspace.
 type DayCommits struct {
-	D      string `json:"d"`
-	Count  int    `json:"count"`
+	D        string   `json:"d"`
+	Count    int      `json:"count"`
 	Subjects []string `json:"subjects,omitempty"`
 }
 
