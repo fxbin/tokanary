@@ -329,4 +329,5 @@ type DashboardPayload struct {
 	PricingMeta  PricingMeta                `json:"pricingMeta"`
 	External     *External                  `json:"external"`
 	Yield        any                        `json:"yield"`
+	TaskCategories any                      `json:"taskCategories,omitempty"`
 }

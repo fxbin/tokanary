@@ -14,6 +14,7 @@ import (
 
 	"github.com/fxbin/tokanary/internal/pricing"
 	"github.com/fxbin/tokanary/internal/warehouse"
+	"github.com/fxbin/tokanary/internal/ai"
 	"github.com/fxbin/tokanary/internal/yield"
 )
 
@@ -31,6 +32,7 @@ type Options struct {
 	ExternalPath string
 	PricesPath   string
 	NoExternal   bool
+	AIEnable     bool
 	// Meta, when non-nil, replaces the meta block built from defaults. refresh
 	// passes a block that records the real pi source paths, schema version and
 	// sizes; the desktop live path leaves it nil and gets a redacted stub.
@@ -237,6 +239,21 @@ func AssembleFromUsage(opt Options, usage *warehouse.Usage, cliStats map[string]
 		PricingMeta:  pricingMeta,
 		External:     external,
 		Yield:        yield.ProjectGit(yield.DiscoverRoots(home)),
+	}
+	if opt.AIEnable {
+		var items []ai.TitleTokens
+		if list, ok := um["sessions"].([]any); ok {
+			for _, it := range list {
+				if m, ok := it.(map[string]any); ok {
+					title, _ := m["title"].(string)
+					tok, _ := m["total"].(float64)
+					items = append(items, ai.TitleTokens{Title: title, Tool: "pi", Tokens: int64(tok)})
+				}
+			}
+		}
+		if cats, err := ai.ClassifyTitles(ai.LoadConfig(), true, items); err == nil && len(cats) > 0 {
+			payload.TaskCategories = cats
+		}
 	}
 	if rs, re := spanRange(payload); rs != "" {
 		payload.Meta.RangeStart = rs

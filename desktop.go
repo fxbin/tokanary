@@ -78,7 +78,8 @@ func (s *APIService) serveDashboard(w http.ResponseWriter, r *http.Request) {
 		// must not blank the dashboard.
 		fmt.Fprintf(os.Stderr, "[warn] live refresh: %v\n", err)
 	}
-	payload, err := dashboard.Assemble(dashboard.Options{RepoRoot: s.repoRoot})
+	aiOn := r.URL.Query().Get("ai") == "1"
+	payload, err := dashboard.Assemble(dashboard.Options{RepoRoot: s.repoRoot, AIEnable: aiOn})
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusServiceUnavailable)
 		return

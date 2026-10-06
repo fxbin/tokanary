@@ -21,6 +21,7 @@ export interface UiState extends PricingOpts {
   sesSortDir: number
   drillProject: string | null
   budgetUsd: number
+  aiCategorize: boolean
 }
 
 export function defaultUiState(): UiState {
@@ -29,7 +30,8 @@ export function defaultUiState(): UiState {
     customUrl: '', customFetchedAt: null, customError: '',
     sortKey: 'total', sortDir: -1, gwQuery: '', gwSort: 'inuse',
     sesQuery: '', sesSortKey: 'updatedAt', sesSortDir: -1,
-    drillProject: null, budgetUsd: 0
+    drillProject: null, budgetUsd: 0,
+    aiCategorize: false
   }
 }
 

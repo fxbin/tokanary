@@ -8,10 +8,10 @@ export function useDashboard() {
   const loading = ref(false)
   let pollTimer: number | null = null
 
-  async function loadDashboard() {
+  async function loadDashboard(enableAI = false) {
     loading.value = true
     try {
-      const res = await fetch('api/dashboard', { cache: 'no-store' })
+      const res = await fetch(enableAI ? 'api/dashboard?ai=1' : 'api/dashboard', { cache: 'no-store' })
       if (!res.ok) throw new Error('HTTP ' + res.status)
       const json = await res.json()
       if (json && typeof json === 'object') {
@@ -27,9 +27,9 @@ export function useDashboard() {
     }
   }
 
-  function startPolling() {
-    void loadDashboard()
-    pollTimer = window.setInterval(() => { void loadDashboard() }, POLL_MS)
+  function startPolling(enableAI = false) {
+    void loadDashboard(enableAI)
+    pollTimer = window.setInterval(() => { void loadDashboard(enableAI) }, POLL_MS)
   }
   function stopPolling() {
     if (pollTimer !== null) {

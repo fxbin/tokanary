@@ -38,7 +38,7 @@
             <button v-for="(r, k) in RANGES" :key="k" :class="{ on: range === k }"
               @click="setRange(k)">{{ r.label }}</button>
           </div>
-          <button class="btn-ghost" id="btn-reload-top" @click="loadDashboard" :disabled="loading">
+          <button class="btn-ghost" id="btn-reload-top" @click="loadDashboard(st.aiCategorize)" :disabled="loading">
             {{ loading ? '读取中…' : '重新读取' }}
           </button>
         </div>
@@ -181,7 +181,7 @@ function onDocClick(e: MouseEvent) {
     return
   }
   if (target.id === 'btn-reload' || target.closest?.('#btn-reload')) {
-    void loadDashboard()
+    void loadDashboard(st.aiCategorize)
     return
   }
 }
@@ -190,7 +190,7 @@ onMounted(() => {
   loadState()
   readHash()
   applyTheme()
-  startPolling()
+  startPolling(st.aiCategorize)
   window.addEventListener('hashchange', onHashChange)
   document.addEventListener('input', onDocInput)
   document.addEventListener('change', onDocChange)
