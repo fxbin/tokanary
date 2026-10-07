@@ -217,21 +217,25 @@ html.push('<section class="card insights">')
 
   /* 跨工具(范围化) */
   if (ext) {
-    const cmpBars = [{
-      label: 'pi', sub: fmt(rs.fields.total) + ' · ' + money(rs.cost),
-      total: rs.fields.total, totalText: fmt(rs.fields.total) + ' · ' + money(rs.cost),
-      segments: CATS.map(function (c) { return { v: (rs.fields as any)[c.k] || 0, color: c.color, name: c.label } })
-    }].concat(re.rows.filter(function (r: any) {
-      // 范围内一个 token 都没有的工具不占行：旧稿把它们列成「0 · $0」再画一根
-      // 恒定的灰竖线，两行纯噪音。
-      return r.tokens > 0
-    }).map(function (r: any) {
+    /* pi 这一行取 piRs（纯 pi 侧），不取 rs。rs 是 rangeStats(merged)，merged 已把
+       全部外部工具并进来 —— 贴 'pi' 标签的其实是全工具合计，于是 pi 一行虚高到
+       连 pi 历史总量都超过（近 7 天 3.56B vs pi 全量 0.61B），还和下面各外部行
+       把同一笔钱算了两遍。全工具合计是各行之和，不是其中一行的量。 */
+    const bars = [{
+      label: 'pi', sub: fmt(piRs.fields.total) + ' · ' + money(piRs.cost),
+      total: piRs.fields.total, totalText: fmt(piRs.fields.total) + ' · ' + money(piRs.cost),
+      segments: CATS.map(function (c) { return { v: (piRs.fields as any)[c.k] || 0, color: c.color, name: c.label } })
+    }].concat(re.rows.map(function (r: any) {
       return {
         label: r.label, sub: fmt(r.tokens) + ' · ' + money(r.cost),
         total: r.tokens, totalText: fmt(r.tokens) + ' · ' + money(r.cost),
         segments: CATS.map(function (c) { return { v: (r.fields as any)[c.k] || 0, color: c.color, name: c.label } })
       }
     }))
+    // 范围内一个 token 都没有的工具不占行：旧稿把它们列成「0 · $0」再画一根
+    // 恒定的灰竖线，两行纯噪音。pi 与外部走同一套判定，不给 pi 开口子。
+    const cmpBars = bars.filter(function (b: any) { return b.total > 0 })
+      .sort(function (a: any, b: any) { return b.total - a.total })
     html.push('<section class="card">')
     html.push('<h2>跨工具总览 · ' + esc(rangeLabel) + ' <span class="hint">token 精确求和；他家费用按综合均价摊算</span></h2>')
     html.push(stackBar(cmpBars))

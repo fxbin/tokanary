@@ -2,7 +2,7 @@
  * 用法: npx vitest run (web/ 目录下)。需要 .cache/dashboard.json（tokanary refresh 生成） */
 import { describe, it, expect } from 'vitest'
 import {
-  computeAll, compareSources, money, dailyCost, externalSummary,
+  computeAll, compareSources, money, dailyCost, externalSummary, fmt,
   rangeStats, rangeExt, rangeAnchor, withMergedDays, mergeDailyCost, RANGES,
   type RangeKey
 } from './pricing'
@@ -143,6 +143,72 @@ suite('总览：同一笔钱不得加自己', () => {
     expect(html).toContain('models.dev 单价')
   })
 })
+
+suite('总览：跨工具总览每行只报自己那一份用量', () => {
+  /** 抓堆叠条里每一行的 sub（「<token> · $<cost>」）。 */
+  function rowsOf(range: RangeKey): string[] {
+    const out: string[] = []
+    const re = /class="lbl-sub">([^<]+) · /g
+    let m: RegExpExecArray | null
+    while ((m = re.exec(overview(range))) !== null) out.push(m[1])
+    return out
+  }
+
+  it('pi 行的数是 pi 自己的量，不是全工具合计', () => {
+    const s = computeAll(DATA, st)
+    const piByDay = dailyCost(DATA, s)
+    for (const range of ['all', '30d', '7d'] as RangeKey[]) {
+      const piRs = rangeStats(DATA, s, piByDay, range)
+      const html = overview(range)
+      if (piRs.fields.total <= 0) continue // pi 该范围内没用量，本就不该有这行
+      const row = html.match(/class="lbl">pi<\/text><text[^>]*class="lbl-sub">([^<]+)/)
+      expect(row, 'pi 行应存在: ' + range).toBeTruthy()
+      expect(row![1], 'pi 行数值: ' + range).toContain(fmt(piRs.fields.total))
+    }
+  })
+
+  it('跨工具总览不出现全工具合计（那是各行之和，不是其中一行的量）', () => {
+    const s = computeAll(DATA, st)
+    const ext = externalSummary(DATA, st.policy)
+    const allRs = rangeStats(withMergedDays(DATA), s, mergeDailyCost(dailyCost(DATA, s), ext, DATA), '7d')
+    // 前置条件：近 7 天确有外部工具用量，全工具合计是个像样的数，断言才有意义
+    expect(allRs.fields.total).toBeGreaterThan(0)
+    const subs = rowsOf('7d').join(' | ')
+    expect(subs).not.toContain(fmt(allRs.fields.total))
+  })
+
+  it('pi 行只在 pi 自身于范围内有用量时出现（与外部行同一把尺子）', () => {
+    const s = computeAll(DATA, st)
+    const piByDay = dailyCost(DATA, s)
+    for (const range of ['all', '30d', '7d'] as RangeKey[]) {
+      const piTotal = rangeStats(DATA, s, piByDay, range).fields.total
+      const shown = /class="lbl">pi<\/text>/.test(overview(range))
+      expect(shown, 'range=' + range + ' piTotal=' + piTotal).toBe(piTotal > 0)
+    }
+  })
+
+  it('各行之和不超过全工具合计（同一笔钱不得在两行各算一次）', () => {
+    const s = computeAll(DATA, st)
+    const ext = externalSummary(DATA, st.policy)
+    for (const range of ['all', '30d', '7d'] as RangeKey[]) {
+      const allRs = rangeStats(withMergedDays(DATA), s, mergeDailyCost(dailyCost(DATA, s), ext, DATA), range)
+      const shown = rowsOf(range)
+        .map(function (t) { return parseTokenText(t) })
+        .reduce(function (a, b) { return a + b }, 0)
+      // 外部工具的 per-day 与 per-model 在采集层就对不齐（Codex 差 4.14%），
+      // 所以允许一点残差，但绝不能出现「全工具再多算一遍」那种量级的虚高。
+      expect(shown, 'range=' + range).toBeLessThanOrEqual(allRs.fields.total * 1.05)
+    }
+  })
+})
+
+/** 把 '610.23M' / '3.56B' / '624.20M' 这类 fmt 输出还原成数值。 */
+function parseTokenText(t: string): number {
+  const m = t.trim().match(/^([\d.]+)([KMB]?)$/)
+  if (!m) return 0
+  const mult = m[2] === 'K' ? 1e3 : m[2] === 'M' ? 1e6 : m[2] === 'B' ? 1e9 : 1
+  return parseFloat(m[1]) * mult
+}
 
 /* ------------------------------------------------------------------ P2：读数条排版 */
 
