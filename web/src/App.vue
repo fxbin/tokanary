@@ -72,7 +72,6 @@ import { useTheme } from './composables/useTheme'
 import { useHashRoute, type TabKey } from './composables/useHashRoute'
 import { useDashboard } from './composables/useDashboard'
 import { usePriceIo } from './composables/usePriceIo'
-import { loadQuotas, saveQuotas } from './quota'
 
 const TABS = [
   { k: 'overview', label: '总览', owner: 'U1/U2', note: 'cost-hero、花费趋势、热力图与洞察行已就绪；跨工具总览随范围联动。' },
@@ -87,15 +86,6 @@ const { theme, applyTheme, toggleTheme, themeIcon, themeTitle } = useTheme()
 const { tab, range, readHash, writeHash, setRange, onHashChange } = useHashRoute(TABS.map((t) => t.k))
 const { dataRef, pollFail, loading, loadDashboard, startPolling } = useDashboard()
 const { ioText, ioError, saveState, loadState, exportPrices, importPrices } = usePriceIo(st)
-
-/** 套餐额度读一次进响应式状态，改动即写回 localStorage（总览/设置页共用同一份）。 */
-function setQuotaField(planId: string, field: 'limitTokens' | 'limitUsd', raw: string) {
-  const v = Number(raw)
-  const next = Number.isFinite(v) && v > 0 ? v : 0
-  const plans = st.quotas.map((q) => (q.id === planId ? { ...q, [field]: next } : q))
-  st.quotas = plans
-  saveQuotas(plans)
-}
 
 /**
  * 焦点保持：v-html 每次都整体重写 innerHTML，正在编辑的 input 会变成一个全新节点，
@@ -146,11 +136,6 @@ function onDocInput(e: Event) {
 function applyDocInput(t: HTMLElement) {
   if (t.id === 'ses-search') {
     st.sesQuery = (t as HTMLInputElement).value
-    return
-  }
-  const quota = t.id.match(/^quota-(tok|usd)-(.+)$/)
-  if (quota) {
-    setQuotaField(quota[2], quota[1] === 'tok' ? 'limitTokens' : 'limitUsd', (t as HTMLInputElement).value)
     return
   }
   if (t.id === 'budget-usd') {
@@ -218,7 +203,6 @@ function onDocClick(e: MouseEvent) {
 
 onMounted(() => {
   loadState()
-  st.quotas = loadQuotas()
   readHash()
   applyTheme()
   startPolling()

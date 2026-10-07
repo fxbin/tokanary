@@ -269,43 +269,21 @@ footer.foot { max-width: 1360px; margin: 8px auto 0; color: var(--dim); font-siz
   .proj-row, .ins, .tool-card { background: var(--wash-2); }
 }
 
-/* 限额：一行摘要（总览）。旧稿是一整块卡片 + 三条恒 0 宽的进度条，
-   额度设不了却配着大额金额 —— 现在没额度就写「未设上限」，不画条。
-   显著性：有信息的百分比与金额都比「未设上限」这句提示更重。 */
-.quota-note { line-height: 2.1; }
-.quota-note .qsum { display: inline-flex; align-items: baseline; gap: 6px; margin: 0 14px 0 4px; }
-.quota-note .qsum + .qsum { border-left: 1px solid var(--line); padding-left: 14px; }
-.quota-note .q-label { font-weight: 600; font-size: 12.5px; }
-.quota-note .q-win {
-  margin-left: 6px; font-style: normal; font-size: 10.5px;
+/* 窗口用量（总览一行摘要）。报的是实测用量，不是订阅额度 —— 各家额度在服务端，
+   本机读不到；旧稿让用户自填上限再拿实测 token 去除，那个百分比的分母是编的。 */
+.win-note { line-height: 1.7; }
+.win-list { display: flex; flex-wrap: wrap; gap: 4px 18px; margin: 6px 0 2px; }
+.win-note .wsum { display: inline-flex; align-items: baseline; gap: 6px; }
+.win-note .w-label { font-weight: 600; font-size: 12.5px; }
+.win-note .w-win {
+  margin-left: 4px; font-style: normal; font-size: 10.5px;
   color: var(--dim); font-weight: 400;
 }
-.quota-note .q-pct {
-  font-variant-numeric: tabular-nums; font-weight: 700; font-size: 13px;
-  color: var(--accent-ink);
+.win-note .w-val {
+  font-variant-numeric: tabular-nums; font-size: 12.5px;
+  color: var(--fg); font-weight: 600;
 }
-.quota-note .q-val { font-variant-numeric: tabular-nums; font-size: 12.5px; color: var(--fg); font-weight: 600; }
-.quota-note .q-none { font-size: 11.5px; color: var(--dim); }
-
-/* 设置页的限额输入：与 #budget-usd 同规格 */
-.quota-input {
-  width: 128px; padding: 5px 8px; font: inherit; font-size: 13px;
-  color: var(--fg); background: var(--wash-2);
-  border: 1px solid var(--line); border-radius: 7px;
-  font-variant-numeric: tabular-nums;
-}
-.quota-input:focus { outline: 2px solid var(--accent-a40); border-color: var(--accent); }
-
-/* 限额行：说明文字在各自输入框正上方，一眼能分清哪个标签管哪个框。
-   旧稿把「token 上限」横排在两个框中间，读起来像第二个框的标签。 */
-.quota-row { gap: 18px; padding: 10px 0; border-top: 1px solid var(--line); }
-.quota-row:first-child { border-top: 0; padding-top: 2px; }
-.quota-name { min-width: 92px; font-weight: 600; color: var(--fg); }
-.quota-name i { font-style: normal; font-weight: 400; color: var(--dim); }
-.quota-name i::before { content: "（"; }
-.quota-name i::after { content: "）"; }
-.quota-cell { display: inline-flex; flex-direction: column; gap: 4px; cursor: pointer; }
-.quota-cell > span { font-size: 11.5px; color: var(--dim); letter-spacing: .02em; }
+.win-note .note-inline { margin-top: 6px; }
 
 /* 产出 · git：0 提交的仓库折进 details，不在首层铺开 */
 .yield-zero { margin-top: 12px; font-size: 12.5px; }
@@ -320,9 +298,8 @@ footer.foot { max-width: 1360px; margin: 8px auto 0; color: var(--dim); font-siz
    旧稿里的 760/640px 档在 MinWidth 900 下永不触发，已删；触控目标同理（见上方注释）。
    窄档一律「收窄 + 换行」，不靠隐藏列——账本丢列等于丢数据。 */
 @media (max-width: 1100px) {
-  /* 限额摘要：窄档换行，金额与 token 数永远留着 */
-  .quota-note .qsum { margin-right: 10px; }
-  .quota-note .qsum + .qsum { padding-left: 10px; }
+  /* 窗口用量：窄档收间距，token 数与金额永远留着 */
+  .win-list { gap: 4px 12px; }
   /* 本周 Top：收固定列宽，百分比列保留 */
   .week-row { grid-template-columns: 12px minmax(96px, 2fr) 3fr 64px 72px 48px; gap: 8px; font-size: 12px; }
   /* 费用明细六列：收窄而非截断 */
@@ -330,7 +307,6 @@ footer.foot { max-width: 1360px; margin: 8px auto 0; color: var(--dim); font-siz
   /* 宽表：先挤内边距换列宽，仍放不下就交给 .tbl-wrap 横滚（有右侧渐隐提示） */
   .tbl th, .tbl td { padding: 6px 7px; }
   .tbl input[type=number] { width: 72px; }
-  .quota-input { width: 104px; }
 }
 @media (max-width: 900px) {
   .cost-row { grid-template-columns: 188px 1fr; gap: 16px; }

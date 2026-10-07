@@ -7,7 +7,7 @@ import {
   type PricingOpts, type PriceSource, type RangeKey
 } from '../pricing'
 import { MODEL_COLORS, stackBar, donut, legend, dayChart, heatmap, trimNum } from '../charts'
-import { computeQuotas, quotaPct, type QuotaUsage } from '../quota'
+import { windowUsage, USAGE_WINDOWS, type WindowUsage } from '../usage'
 import { th, sourceTag, stableColorIndex, sesRecency, pad2, localDay, esc, type UiState } from './shared'
 
 export function renderOverview(data: any, st: UiState, cmp: Record<string, number>, range: RangeKey): string {
@@ -74,26 +74,31 @@ export function renderOverview(data: any, st: UiState, cmp: Record<string, numbe
       '</div><div class="kpi-v">' + esc(k.value) + '</div><div class="kpi-s">' + esc(k.sub) + '</div></div>'
   }).join('') + '<div class="spark-row">' + streakCell + heroSpark + '</div></section>')
 
-  /* 限额 · 已用：一行摘要。
-     旧稿是一整块卡片 + 三条恒为 0 宽的进度条：额度在本应用里根本设不了
-     （limitTokens 恒 0 → pct 为 null → width:0%），于是界面出现「编码成 0% 的空条」
-     配着一笔真实金额。现在没额度就明说没额度，不画条。 */
+  /* 窗口用量：各家额度存在服务端，本机读不到，所以只报实测用量，不给百分比。
+     旧稿这块叫「限额」，让用户先填一个上限再拿实测 token 去除 —— 分母是随手编的
+     数字，612.35M tok 除以它得到的百分比，精度全看填得准不准，界面却写得像在
+     报告事实。默认状态下它还恒显三行「额度上限未设置」。 */
   {
-    const quotas = computeQuotas(data, st.quotas, st.policy)
-    const visible = quotas.filter(function (q: QuotaUsage) { return quotaPct(q) !== null || q.tokens > 0 })
-    if (visible.length) {
-      html.push('<div class="note quota-note"><b>限额</b>：' + visible.map(function (q: QuotaUsage) {
-        const p = quotaPct(q)
-        const limit = q.plan.limitTokens > 0 ? fmt(q.plan.limitTokens) + ' tok'
-          : q.plan.limitUsd > 0 ? money(q.plan.limitUsd) : ''
-        return '<span class="qsum"><b class="q-label">' + esc(q.plan.label) +
-          '<i class="q-win">' + esc(q.plan.window) + '</i></b>' +
-          (p === null
-            ? '<span class="q-none">额度上限未设置</span>'
-            : '<span class="q-pct">' + Math.round(p) + '%</span>') +
-          '<span class="q-val">' + fmt(q.tokens) + ' tok · ' + money(q.cost) +
-          (limit ? ' / 上限 ' + limit : '') + '</span></span>'
-      }).join('') + ' · 额度在<a href="#/settings?range=all">设置页</a>填</div>')
+    const usage = windowUsage(data, st.policy)
+    if (usage.length) {
+      const shown = usage.slice(0, 5)
+      const rest = usage.length - shown.length
+      html.push('<div class="note win-note"><b>窗口用量</b> ' +
+        '<span class="dim small">近 7 天 / 近 30 天 · 锚定最新数据日，不随上方范围切换</span>' +
+        '<div class="win-list">' + shown.map(function (u: WindowUsage) {
+          return '<span class="wsum"><b class="w-label">' + esc(u.label) + '</b>' +
+            USAGE_WINDOWS.map(function (w) {
+              const x = u.byWindow[w.key]
+              if (!x || !(x.tokens > 0)) return ''
+              return '<i class="w-win">' + esc(w.label) + '</i>' +
+                '<span class="w-val">' + fmt(x.tokens) + ' · ' + money(x.cost) + '</span>'
+            }).join('') + '</span>'
+        }).join('') +
+        (rest > 0 ? '<span class="dim small">…另有 ' + rest + ' 个工具近 30 天有用量，见跨工具总览</span>' : '') +
+        '</div>' +
+        '<div class="note-inline dim small">这是从本机用量日志实测的用量，不是各家订阅额度 —— 额度在服务端，本机读不到。' +
+        '费用是按 models.dev 均价折算的 API 等价成本，订阅制下你实际付的不是这个数。' +
+        '本机工具的花费提醒在<a href="#/settings?range=all">设置页</a>的月预算。</div></div>')
     }
   }
 

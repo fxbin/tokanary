@@ -7,7 +7,6 @@ import {
   type PricingOpts, type PriceSource, type RangeKey
 } from '../pricing'
 import { MODEL_COLORS, stackBar, donut, legend, dayChart, heatmap, trimNum } from '../charts'
-import type { QuotaPlan } from '../quota'
 
 /**
  * esc():HTML 转义之前先洗掉 U+FFFD 替换字符。
@@ -28,8 +27,6 @@ export interface UiState extends PricingOpts {
   sesSortDir: number
   drillProject: string | null
   budgetUsd: number
-  /** 套餐额度；由 App.vue 从 localStorage 读入，改动即写回（saveQuotas）。 */
-  quotas: QuotaPlan[]
 }
 
 export function defaultUiState(): UiState {
@@ -37,8 +34,7 @@ export function defaultUiState(): UiState {
     policy: 'ratio10', priceSource: 'modelsdev', overrides: {}, customPrices: null,
     sortKey: 'total', sortDir: -1,
     sesQuery: '', sesSortKey: 'updatedAt', sesSortDir: -1,
-    drillProject: null, budgetUsd: 0,
-    quotas: []
+    drillProject: null, budgetUsd: 0
   }
 }
 

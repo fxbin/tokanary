@@ -11,7 +11,7 @@ import {
   defaultUiState, missingSections, esc, type UiState
 } from './render'
 import { hasAnyPricing, loadDashboardFixture } from './testsupport'
-import { computeQuotas, loadQuotas, saveQuotas, type QuotaPlan } from './quota'
+import { windowUsage, USAGE_WINDOWS } from './usage'
 
 const DATA = loadDashboardFixture()
 const suite = DATA ? describe : describe.skip
@@ -19,11 +19,6 @@ const suite = DATA ? describe : describe.skip
 const st = defaultUiState()
 const cmp = DATA ? compareSources(DATA, st) : {}
 
-/** 总览在当前夹具下常用的两条默认套餐（额度未设 = 0）。 */
-const PLANS: QuotaPlan[] = [
-  { id: 'codex', label: 'Codex', tool: 'codex', window: '7d', limitTokens: 0, limitUsd: 0 },
-  { id: 'zcode', label: 'ZCode', tool: 'zcode', window: '7d', limitTokens: 0, limitUsd: 0 }
-]
 
 function overview(range: RangeKey, ui?: Partial<UiState>): string {
   const s = Object.assign(defaultUiState(), ui || {})
@@ -167,27 +162,42 @@ suite('总览：读数条不留空行', () => {
   })
 })
 
-/* ------------------------------------------------------------------ P1：限额 */
+/* ------------------------------------------------------------------ 窗口用量 */
 
-suite('总览：限额摘要', () => {
-  it('不再渲染 0% 空进度条（额度未设时也不画条）', () => {
-    const html = overview('all', { quotas: PLANS })
-    expect(html).not.toContain('q-bar')
-    expect(html).not.toMatch(/width:0(\.0)?%/)
-  })
-
-  it('额度未设 → 明说未设上限', () => {
-    const html = overview('all', { quotas: PLANS })
-    expect(html).toContain('额度上限未设置')
-    expect(html).not.toMatch(/<span class="q-none">—/)
-  })
-
-  it('额度已设 → 给真实百分比与已用量', () => {
-    const plans = PLANS.map((p) => ({ ...p, limitTokens: 2_000_000_000 }))
-    const html = overview('all', { quotas: plans })
+suite('总览：窗口用量（不再假装知道额度）', () => {
+  it('只报实测窗口用量，不出现任何百分比或额度上限', () => {
+    // 旧稿的分母是用户自填的上限，612.35M tok 除以它得到的百分比不能支撑任何决策。
+    // 各家额度在服务端，本机读不到，所以这一块不给占比。
+    // 断言必须卡在 w-val 内部：整页别处（如本周 Top）本来就合法地有百分比。
+    const html = overview('all')
+    expect(html).toContain('窗口用量')
     expect(html).not.toContain('额度上限未设置')
-    expect(html).toMatch(/>\d+%</)
-    expect(html).toContain('上限')
+    expect(html).not.toContain('q-pct')
+    expect(html).not.toMatch(/<span class="w-val">[^<]*%/)
+  })
+
+  it('把「这是用量不是额度」和费用口径写在明面上', () => {
+    const html = overview('all')
+    expect(html).toContain('不是各家订阅额度')
+    expect(html).toContain('API 等价成本')
+    expect(html).toContain('不随上方范围切换')
+  })
+
+  it('窗口标签只给算得出来的：近 7 天 / 近 30 天，不出现 5 小时', () => {
+    // 外部 CLI 的用量日志是逐日粒度（pi 侧才有 hours），5 小时窗口测不出来就不提供。
+    const html = overview('all')
+    expect(html).toContain('近 7 天')
+    expect(html).toContain('近 30 天')
+    expect(html).not.toContain('5 小时')
+    expect(html).not.toContain('5h')
+  })
+
+  it('工具行按近 30 天 token 降序，且每个工具带窗口标签与 token/金额', () => {
+    const u = windowUsage(DATA, st.policy)
+    expect(u.length).toBeGreaterThan(1)
+    for (let i = 1; i < u.length; i++) expect(u[i].tokens).toBeLessThanOrEqual(u[i - 1].tokens)
+    const html = overview('all')
+    expect(html).toContain(esc(u[0].label))
   })
 })
 
@@ -225,10 +235,13 @@ suite('设置页：单价只有 models.dev', () => {
     expect(html).toContain('手动改价')
   })
 
-  it('限额区块给出可填的额度输入', () => {
-    const html = renderSettings(DATA, { ...defaultUiState(), quotas: PLANS }, cmp, 'all', '')
-    expect(html).toContain('id="quota-tok-codex"')
-    expect(html).toContain('id="quota-usd-codex"')
+  it('不再有额度输入：额度在服务端，本机设不了就不给一个假的上限框', () => {
+    const html = renderSettings(DATA, st, cmp, 'all', '')
+    expect(html).not.toContain('quota-tok-')
+    expect(html).not.toContain('quota-usd-')
+    expect(html).not.toContain('tokanary-quotas-v1')
+    // 本机工具的花费提醒由月预算承担，那条入口必须还在
+    expect(html).toContain('id="budget-usd"')
   })
 })
 
@@ -337,29 +350,36 @@ suite('空态：区分「从来没有数据」与「落在窗口外」', () => {
   })
 })
 
-/* ------------------------------------------------------------------ 额度口径（quota.ts）
+/* ------------------------------------------------------------------ 窗口用量口径（usage.ts）
 
-   下面三条只用合成夹具，不依赖 .cache/dashboard.json —— 它们守的是这段代码本身。
-   背景：computeQuotas 的单价曾经退回「四档单价算术平均」，缓存读占大头的工具
-   （真实 Codex：33,876,829,458 缓存读、0 缓存写）费用直接差 8 倍，而整个套件
+   下面这几条只用合成夹具，不依赖 .cache/dashboard.json —— 它们守的是这段代码本身。
+   背景：这段逻辑的前身 computeQuotas 单价曾退回「四档单价算术平均」，缓存读占大头的
+   工具（真实 Codex：33,876,829,458 缓存读、0 缓存写）费用直接差 8 倍，而整个套件
    当时照样全绿。external.tools[] 从不带 unit 字段，所以那条 fallback 是唯一生效路径。 */
 
-describe('quota：限额费用按真实 token 构成加权', () => {
-  /** 本地今天（computeQuotas 以「今天为终点向前推」过滤 days，夹具必须落在窗口内）。 */
-  function todayKey(): string {
+describe('usage：窗口用量按真实 token 构成加权', () => {
+  /** 锚点日。windowUsage 走 filterDaysByRange(anchor = rangeAnchor)，窗口以最新数据日
+   *  为终点向前推，所以夹具的 day 必须落在 rangeAnchor 能扫到的范围内。 */
+  function anchorKey(): string {
     const d = new Date()
     const pad = function (x: number) { return String(x).padStart(2, '0') }
     return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate())
   }
 
-  /** 合成一个外部工具：单模型 + 单日，day 落在今天，因此任何套餐窗口都收得到。 */
-  function extTool(tool: string, mix: { cacheRead: number; cacheWrite: number; input: number; output: number }, cost: any): any {
+  function dayOffset(offset: number): string {
+    const t = new Date(new Date(anchorKey() + 'T00:00:00').getTime() + offset * 86400000)
+    const pad = function (x: number) { return String(x).padStart(2, '0') }
+    return t.getFullYear() + '-' + pad(t.getMonth() + 1) + '-' + pad(t.getDate())
+  }
+
+  /** 合成一个外部工具：单模型 + 指定几天的日用量。 */
+  function extTool(tool: string, mix: { cacheRead: number; cacheWrite: number; input: number; output: number }, cost: any, dayOffsets: number[] = [0]): any {
     const total = mix.cacheRead + mix.cacheWrite + mix.input + mix.output
     const m = { id: 'demo-model', total, cacheRead: mix.cacheRead, cacheWrite: mix.cacheWrite, input: mix.input, output: mix.output }
     return {
       tool, label: tool, total,
       models: [Object.assign({}, m, { price: { cost } })],
-      days: [Object.assign({ d: todayKey() }, mix, { total })]
+      days: dayOffsets.map((o) => Object.assign({ d: dayOffset(o) }, mix, { total }))
     }
   }
 
@@ -367,26 +387,22 @@ describe('quota：限额费用按真实 token 构成加权', () => {
     return { external: { tools: [tool], totals: { sessions: 1, calls: 1 } } }
   }
 
-  const PLAN: QuotaPlan[] = [
-    { id: 'demo', label: 'Demo', tool: 'demo', window: '7d', limitTokens: 0, limitUsd: 0 }
-  ]
-
   it('缓存读占 99% 的工具，费用必须远低于四价算术平均（锁加权均价，不锁字符串）', () => {
     const total = 1_000_000_000
     const mix = { cacheRead: 990_000_000, cacheWrite: 1_000_000, input: 5_000_000, output: 4_000_000 }
     const price = { input: 10, output: 30, cache_read: 0.1, cache_write: 12.5 }
-    const q = computeQuotas(dataOf(extTool('demo', mix, price)), PLAN)[0]
+    const u = windowUsage(dataOf(extTool('demo', mix, price)))[0]
 
     // 真实加权费用 = 990e6×0.1 + 5e6×10 + 4e6×30 + 1e6×12.5，除以 1e6 = 281.5
-    expect(q.tokens).toBe(total)
-    expect(q.cost).toBeCloseTo(281.5, 6)
-    expect(q.cost).toBeGreaterThan(0)
+    expect(u.byWindow['30d'].tokens).toBe(total)
+    expect(u.byWindow['30d'].cost).toBeCloseTo(281.5, 6)
+    expect(u.byWindow['30d'].cost).toBeGreaterThan(0)
 
     // 旧口径：四档单价算术平均 (10+30+0.1+12.5)/4 = 13.15 $/M → 13,150
     const arithUnit = (10 + 30 + 0.1 + 12.5) / 4
     const arithCost = arithUnit * total / 1e6
-    expect(q.cost).toBeLessThan(arithCost * 0.05)
-    expect(arithCost / q.cost).toBeGreaterThan(40)
+    expect(u.byWindow['30d'].cost).toBeLessThan(arithCost * 0.05)
+    expect(arithCost / u.byWindow['30d'].cost).toBeGreaterThan(40)
   })
 
   it('policy 参数真的进算式：缺 cache_write 单价时 ratio10 与 zero 差出那笔缓存写', () => {
@@ -394,43 +410,38 @@ describe('quota：限额费用按真实 token 构成加权', () => {
     // 故意不给 cache_write：normalizeCost 会按 policy 推算（ratio10 = input×1.25，zero = 0）
     const price = { input: 10, output: 30, cache_read: 0.1 }
     const data = dataOf(extTool('demo', mix, price))
-    const a = computeQuotas(data, PLAN, 'ratio10')[0]
-    const b = computeQuotas(data, PLAN, 'zero')[0]
+    const a = windowUsage(data, 'ratio10')[0]
+    const b = windowUsage(data, 'zero')[0]
 
     // 缓存写 200e6 × (12.5 - 0) / 1e6 = 2,500
-    expect(a.cost).toBeCloseTo(14_500, 6)
-    expect(b.cost).toBeCloseTo(12_000, 6)
-    expect(a.cost - b.cost).toBeCloseTo(2_500, 6)
-    expect(a.cost).toBeGreaterThan(b.cost)
+    expect(a.byWindow['30d'].cost).toBeCloseTo(14_500, 6)
+    expect(b.byWindow['30d'].cost).toBeCloseTo(12_000, 6)
+    expect(a.byWindow['30d'].cost - b.byWindow['30d'].cost).toBeCloseTo(2_500, 6)
+    expect(a.byWindow['30d'].cost).toBeGreaterThan(b.byWindow['30d'].cost)
     // 省略 policy 时必须落到 ratio10：默认值翻成 zero 也要被这条抓住
-    expect(computeQuotas(data, PLAN)[0].cost).toBeCloseTo(a.cost, 6)
+    expect(windowUsage(data)[0].byWindow['30d'].cost).toBeCloseTo(a.byWindow['30d'].cost, 6)
   })
 
-  it('loadQuotas / saveQuotas 往返相等（saveQuotas 这一轮第一次有了调用者）', () => {
-    // vitest 默认 node 环境没有 localStorage；没有这层替身两个函数都会静默吞掉异常，
-    // 往返测试会假绿。
-    const store: Record<string, string> = {}
-    const orig = (globalThis as any).localStorage
-    ;(globalThis as any).localStorage = {
-      getItem: function (k: string) { return Object.prototype.hasOwnProperty.call(store, k) ? store[k] : null },
-      setItem: function (k: string, v: string) { store[k] = String(v) },
-      removeItem: function (k: string) { delete store[k] },
-      clear: function () { for (const k of Object.keys(store)) delete store[k] },
-      key: function (i: number) { return Object.keys(store)[i] ?? null },
-      length: 0
-    }
-    try {
-      expect(loadQuotas()).toHaveLength(3) // 空仓库给 3 条默认套餐
+  it('窗口边界正确：7 天窗口不含 7 天前，30 天窗口含 29 天前但不含 30 天前', () => {
+    // 边界 = anchor-(n-1) .. anchor（rangeCutoffKey）。旧稿的 windowDays 另写了一套
+    // 日算法，还把类型里的 '5h' 兜底成 30 天；这里锁住窗口与顶栏范围切换同源。
+    const mix = { cacheRead: 0, cacheWrite: 0, input: 1000, output: 0 }
+    const data = dataOf(extTool('demo', mix, { input: 1, output: 1 }, [0, -3, -6, -7, -29, -30]))
+    const u = windowUsage(data)[0]
+    expect(u.byWindow['7d'].tokens).toBe(3000)   // 0 / -3 / -6；-7 已在窗外
+    expect(u.byWindow['30d'].tokens).toBe(5000)  // 加上 -7、-29；-30 已在窗外
+  })
 
-      const plans: QuotaPlan[] = [
-        { id: 'codex', label: 'Codex', tool: 'codex', window: '7d', limitTokens: 2_000_000_000, limitUsd: 50 },
-        { id: 'mimo', label: 'Xiaomi MiMo', tool: 'xiaomi-mimo', window: '30d', limitTokens: 0, limitUsd: 12.5 }
-      ]
-      saveQuotas(plans)
-      expect(loadQuotas()).toEqual(plans)
-    } finally {
-      if (orig === undefined) delete (globalThis as any).localStorage
-      else (globalThis as any).localStorage = orig
-    }
+  it('只提供算得出来的窗口：USAGE_WINDOWS 里没有 5 小时', () => {
+    // 外部 CLI 的用量日志是逐日粒度（pi 侧才有 hours），5 小时窗口测不出来就不提供。
+    expect(USAGE_WINDOWS.map((w) => w.key)).toEqual(['7d', '30d'])
+    expect(USAGE_WINDOWS.map((w) => w.label)).not.toContain('5 小时')
+  })
+
+  it('近 30 天没动静的工具不进列表', () => {
+    const quiet: any = extTool('quiet', { cacheRead: 0, cacheWrite: 0, input: 10, output: 0 }, { input: 1, output: 1 }, [-45])
+    const busy: any = extTool('busy', { cacheRead: 0, cacheWrite: 0, input: 20, output: 0 }, { input: 1, output: 1 }, [0])
+    const u = windowUsage({ external: { tools: [quiet, busy], totals: {} } })
+    expect(u.map((x) => x.tool)).toEqual(['busy'])
   })
 })

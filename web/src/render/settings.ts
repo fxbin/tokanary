@@ -9,7 +9,6 @@ import {
 import { MODEL_COLORS, stackBar, donut, legend, dayChart, heatmap, trimNum } from '../charts'
 import { th, sourceTag, stableColorIndex, sesRecency, pad2, localDay, esc, type UiState } from './shared'
 import { budgetAlertHtml } from './projects'
-import { computeQuotas, quotaPct, type QuotaUsage } from '../quota'
 
 export function renderSettings(data: any, st: UiState, cmp: Record<string, number>, _range: RangeKey, ioText: string, ioError = ''): string {
   if (!data) {
@@ -37,40 +36,6 @@ export function renderSettings(data: any, st: UiState, cmp: Record<string, numbe
       '</b> / <b>' + money(st.budgetUsd) + '</b>（' + pct(rs.cost / st.budgetUsd * 100) + '）· 安全</div>')
   }
   html.push('</div></section>')
-
-  /* 套餐限额：额度只在这里能设（总览只读）。0 = 未设上限，总览就写「额度上限未设置」，
-     不再出现一条编码成 0% 的空进度条配着真实金额。 */
-  {
-    const quotas = computeQuotas(data, st.quotas, st.policy)
-    html.push('<section class="card">')
-    html.push('<h2>限额 <span class="hint">按套餐窗口统计外部 CLI 用量 · 0 = 未设上限</span></h2>')
-    if (!quotas.length) {
-      html.push('<div class="empty">没有可配置的套餐。</div>')
-    } else {
-      html.push('<div class="settings">')
-      quotas.forEach(function (q: QuotaUsage) {
-        const p = quotaPct(q)
-        // 标签放在各自输入框的正上方（label 包住说明 + input，点文字也能聚焦）。
-        // 旧稿把「token 上限」夹在两个框中间横排，读起来像第二个框的标签。
-        html.push('<div class="set-row quota-row">')
-        html.push('<span class="quota-name">' + esc(q.plan.label) +
-          '<i>' + esc(q.plan.window) + '</i></span>')
-        html.push('<label class="quota-cell"><span>token 上限</span>' +
-          '<input id="quota-tok-' + esc(q.plan.id) + '" class="quota-input" type="number" min="0" step="100000" ' +
-          'placeholder="未设上限" value="' + (q.plan.limitTokens > 0 ? q.plan.limitTokens : '') + '"></label>')
-        html.push('<label class="quota-cell"><span>USD 上限</span>' +
-          '<input id="quota-usd-' + esc(q.plan.id) + '" class="quota-input" type="number" min="0" step="1" ' +
-          'placeholder="未设上限" value="' + (q.plan.limitUsd > 0 ? q.plan.limitUsd : '') + '"></label>')
-        html.push('<span class="dim small">窗口内已用 ' + fmt(q.tokens) + ' tok · ' + money(q.cost) +
-          (p === null ? '（无上限，不算占比）' : ' · 占 ' + Math.round(p) + '%') + '</span>')
-        html.push('</div>')
-      })
-      html.push('<div class="note-inline dim small">留空或填 0 即关闭该条上限；统计窗口以今天为终点向前推，' +
-        '与顶栏的范围切换无关。费用按该工具按真实 token 构成加权的综合均价摊算，与总览同口径。</div>')
-      html.push('</div>')
-    }
-    html.push('</section>')
-  }
 
   /* 价格设置：单价只走 models.dev（AGENTS.md：无网关价源，无自定义源） */
   const policyMatters = s.rows.some(function (r: any) {
@@ -116,7 +81,7 @@ export function renderSettings(data: any, st: UiState, cmp: Record<string, numbe
   html.push('</div></section>')
 
   html.push('<div class="note"><b>设置持久化</b>：口径 / 策略 / 改价 / 预算 存在 localStorage ' +
-    '（键 <code>pi-token-pricing-v1</code>），刷新不丢；套餐额度存在 <code>tokanary-quotas-v1</code>。' +
-    '导入导出只覆盖价格相关字段，不动预算、额度与主题。</div>')
+    '（键 <code>pi-token-pricing-v1</code>），刷新不丢。' +
+    '导入导出只覆盖价格相关字段，不动预算与主题。</div>')
   return html.join('')
 }
