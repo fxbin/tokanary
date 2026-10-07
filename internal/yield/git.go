@@ -3,6 +3,7 @@
 package yield
 
 import (
+	"time"
 	"database/sql"
 	"os/exec"
 
@@ -123,9 +124,15 @@ func openSQLite(path string) (*sql.DB, error) {
 
 var _ = filepath.Join
 
+var cachedRoots map[string]string
+var cachedRootsAt time.Time
+
 // DiscoverRoots walks well-known local agent DBs for workspace paths that are
 // git repos (ZCode session.directory, mimocode session.directory).
 func DiscoverRoots(home string) map[string]string {
+	if cachedRoots != nil && time.Since(cachedRootsAt) < 10*time.Minute {
+		return cachedRoots
+	}
 	out := map[string]string{}
 	add := func(name, dir string) {
 		dir = strings.TrimSpace(dir)

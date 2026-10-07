@@ -29,7 +29,7 @@
         <div class="top-left">
           <h1>{{ tabTitle }}
             <span id="fresh" :class="'fresh ' + freshClass" :title="freshTitle">{{ freshText }}</span>
-            <span v-if="pollFail" class="fresh fresh-err" title="从本地仓库读取数据失败，请先运行 tokanary refresh 重建仓库">读取失败</span>
+            <span v-if="pollFail" class="fresh fresh-err">读取失败</span>
           </h1>
           <div class="sub" v-html="topSub"></div>
         </div>
