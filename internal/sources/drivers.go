@@ -1,5 +1,7 @@
 package sources
 
+import "strings"
+
 // codex implements the two quirks of the codex rollout format.
 //
 //  1. input_tokens is the TOTAL prompt including cache. Provable from a single
@@ -25,9 +27,14 @@ func codex(raw []*rawObj, m *Manifest, ctx *Context) []Record {
 	hasPrev := false
 	var curModel string
 	var sid string
-	var pending map[string]int64
-	pendingSet := false
-	var pendingSid string
+	// Pending usage is bucketed by DAY, not pooled into one bucket. It used to
+	// be a single bucket with no timestamp at all, and normalize only files a
+	// record into byDay when Ts is a non-empty string - so every parked record
+	// counted towards byModel and silently vanished from byDay. Measured on this
+	// machine: codex per-model and per-day disagreed by 1.47B tokens (4.14%).
+	var pending map[string]map[string]int64
+	var pendingSession map[string]string
+	var pendingOrder []string
 
 	rec := func(model, sess string, ts any, tok map[string]int64) Record {
 		return Record{
@@ -38,11 +45,14 @@ func codex(raw []*rawObj, m *Manifest, ctx *Context) []Record {
 		}
 	}
 	flushPending := func(model string) {
-		if pendingSet {
-			out = append(out, rec(orUnknown(model), orQ(pendingSid), nil, pending))
-			pending = nil
-			pendingSet = false
+		for _, day := range pendingOrder {
+			var ts any
+			if day != unknownDay {
+				ts = day
+			}
+			out = append(out, rec(orUnknown(model), orQ(pendingSession[day]), ts, pending[day]))
 		}
+		pending, pendingSession, pendingOrder = nil, nil, nil
 	}
 
 	for _, o := range raw {
@@ -78,17 +88,8 @@ func codex(raw []*rawObj, m *Manifest, ctx *Context) []Record {
 			if mv != nil {
 				curModel = str(mv)
 				// flush usage parked before the model was known
-				if pendingSet {
-					s := sid
-					if pendingSid != "" {
-						s = pendingSid
-					}
-					if s == "" {
-						s = o.File
-					}
-					out = append(out, rec(curModel, s, nil, pending))
-					pending = nil
-					pendingSet = false
+				if len(pendingOrder) > 0 {
+					flushPending(curModel)
 				}
 			}
 			if sid == "" {
@@ -185,16 +186,25 @@ func codex(raw []*rawObj, m *Manifest, ctx *Context) []Record {
 		if curModel != "" {
 			out = append(out, rec(curModel, session, ts, tok))
 		} else {
-			// model not yet known: park the usage (18M tokens rely on this)
-			if !pendingSet {
-				pending = blankTokens()
-				pendingSet = true
+			// model not yet known: park the usage (18M tokens rely on this).
+			// Bucketed by day so the parked tokens keep their date and still
+			// reach byDay once the model shows up.
+			day := dayOf(ts, o.File)
+			p := pending[day]
+			if p == nil {
+				p = blankTokens()
+				if pending == nil {
+					pending = map[string]map[string]int64{}
+					pendingSession = map[string]string{}
+				}
+				pending[day] = p
+				pendingOrder = append(pendingOrder, day)
 			}
 			for _, k := range TokenKeys {
-				pending[k] += tok[k]
+				p[k] += tok[k]
 			}
-			if pendingSid == "" {
-				pendingSid = session
+			if pendingSession[day] == "" {
+				pendingSession[day] = session
 			}
 		}
 	}
@@ -207,6 +217,28 @@ func firstPath(paths []string) []string {
 		return nil
 	}
 	return []string{paths[0]}
+}
+
+// unknownDay is the bucket key for usage whose date could not be determined.
+// It keeps the tokens in byModel; they just cannot be placed on a day.
+const unknownDay = ""
+
+// dayOf resolves the calendar day a record belongs to. Every codex token_count
+// line carries a timestamp, so the normal path is its first 10 characters. The
+// rollout filename is the fallback: rollout-2026-03-04T19-26-36-<uuid>.jsonl
+// opens with the session's own date.
+func dayOf(ts any, file string) string {
+	if s, ok := ts.(string); ok && len(s) >= 10 {
+		return s[:10]
+	}
+	const pfx = "rollout-"
+	if i := strings.Index(file, pfx); i >= 0 {
+		rest := file[i+len(pfx):]
+		if len(rest) >= 10 && rest[4] == '-' && rest[7] == '-' {
+			return rest[:10]
+		}
+	}
+	return unknownDay
 }
 
 func orUnknown(s string) string {
