@@ -3,9 +3,9 @@
 package yield
 
 import (
-	"time"
 	"database/sql"
 	"os/exec"
+	"time"
 
 	_ "modernc.org/sqlite"
 	"path/filepath"

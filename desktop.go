@@ -10,13 +10,13 @@
 package main
 
 import (
-	"time"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
 
@@ -50,7 +50,7 @@ const fallbackHTML = `<!doctype html>
 // APIService serves dashboard JSON from the local warehouse. Mounted on the
 // asset server at /api so the WebView can fetch() it same-origin.
 type APIService struct {
-	repoRoot string
+	repoRoot  string
 	lastTouch time.Time
 }
 
