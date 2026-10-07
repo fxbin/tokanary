@@ -3,7 +3,7 @@
  * 「1/2/2/2/2/2…」一团糊字。这里锁三件事：稀疏时不减标签、稠密时按宽度抽稀、
  * 任何两个保留标签的间距都不小于一个标签的占宽（这是抽稀真正要保证的东西）。 */
 import { describe, it, expect } from 'vitest'
-import { dayChart, dateShort, type DayRow } from './charts'
+import { dayChart, dateShort, stackBar, textUnits, type DayRow } from './charts'
 
 /* dayChart 的 X 轴文字都落在 y = h-12 = 248；Y 轴刻度虽然也带 .axis，
  * 但 y 落在绘图区内，用 y="248" 就能只摘出 X 轴标签。 */
@@ -84,5 +84,52 @@ describe('dayChart X 轴标签抽稀', () => {
         expect(ls[ls.length - 1].x - ls[ls.length - 2].x, 'n=' + n + ' 末两位重叠').toBeGreaterThanOrEqual(38)
       }
     }
+  })
+})
+
+/* stackBar 的标签栏与右侧数值栏曾经写死宽度（132/150/160/170 各不相同），
+   而 .chart 是 overflow: visible —— 短的名字把长的挤出去，溢出的文字不会
+   被裁掉，只会盖在柱子上（真实数据：DeepSeek Harness（DSH Desktop）需 211 单位，
+   旧写法只给 132，柱子正好压住标签中间）。 */
+describe('stackBar：按内容实测栏宽', () => {
+  const seg = (v: number) => [{ v, color: 'var(--chart-c0)', name: 's' }]
+
+  it('标签栏容得下最长标签，不截断也不压柱', () => {
+    const label = 'DeepSeek Harness（DSH Desktop）'
+    const html = stackBar([{ label, total: 100, totalText: '100', segments: seg(100) }], { labelW: 132 })
+    const x = Number((html.match(/<rect x="([\d.]+)"/) || [])[1])
+    expect(textUnits(label, 12.5) + 12).toBeLessThanOrEqual(x)
+    expect(html).not.toContain('…')            // 未触发截断
+    expect(x).toBeGreaterThan(132)             // 不是写死的 132
+  })
+
+  it('副标题（更长的那行）也算进标签栏宽度', () => {
+    const html = stackBar([
+      { label: 'pi', sub: '9.78B · $5,398.07', total: 100, totalText: '100', segments: seg(100) }
+    ], { labelW: 132 })
+    const x = Number((html.match(/<rect x="([\d.]+)"/) || [])[1])
+    expect(textUnits('9.78B · $5,398.07', 10.5) + 12).toBeLessThanOrEqual(x)
+  })
+
+  it('最长条的右端不越过右侧数值栏起点', () => {
+    const items = [
+      { label: 'pi', total: 978, totalText: '9.78B · $5,398.07', segments: seg(978) },
+      { label: 'b', total: 1, totalText: '1', segments: seg(1) }
+    ]
+    const html = stackBar(items)
+    // 最大那行的条从 labelW 起、长度 = plotW，终点必须 ≤ 900 - 数值占宽 - 留白
+    const x = Number((html.match(/<rect x="([\d.]+)"/) || [])[1])
+    const firstWidth = Number((html.match(/<rect x="[\d.]+" y="[\d.]+" width="([\d.]+)"/) || [])[1])
+    expect(x + firstWidth).toBeLessThanOrEqual(900 - textUnits('9.78B · $5,398.07', 12) - 12)
+  })
+
+  it('整行量级为 0 时不画那根灰竖标（有量级但无分段才画）', () => {
+    const zero = stackBar([{ label: 'x', total: 0, totalText: '0', segments: [] }])
+    expect(zero).not.toMatch(/fill="var\(--dim\)" opacity="\.4"/)
+    const noSegButScaled = stackBar([
+      { label: 'a', total: 10, totalText: '10', segments: seg(10) },
+      { label: 'b', total: 5, totalText: '5', segments: [] }
+    ])
+    expect(noSegButScaled).toMatch(/fill="var\(--dim\)" opacity="\.4"/)
   })
 })

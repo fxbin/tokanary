@@ -221,7 +221,11 @@ html.push('<section class="card insights">')
       label: 'pi', sub: fmt(rs.fields.total) + ' · ' + money(rs.cost),
       total: rs.fields.total, totalText: fmt(rs.fields.total) + ' · ' + money(rs.cost),
       segments: CATS.map(function (c) { return { v: (rs.fields as any)[c.k] || 0, color: c.color, name: c.label } })
-    }].concat(re.rows.map(function (r) {
+    }].concat(re.rows.filter(function (r: any) {
+      // 范围内一个 token 都没有的工具不占行：旧稿把它们列成「0 · $0」再画一根
+      // 恒定的灰竖线，两行纯噪音。
+      return r.tokens > 0
+    }).map(function (r: any) {
       return {
         label: r.label, sub: fmt(r.tokens) + ' · ' + money(r.cost),
         total: r.tokens, totalText: fmt(r.tokens) + ' · ' + money(r.cost),
@@ -230,7 +234,7 @@ html.push('<section class="card insights">')
     }))
     html.push('<section class="card">')
     html.push('<h2>跨工具总览 · ' + esc(rangeLabel) + ' <span class="hint">token 精确求和；他家费用按综合均价摊算</span></h2>')
-    html.push(stackBar(cmpBars, { labelW: 132 }))
+    html.push(stackBar(cmpBars))
     html.push(legend(CATS.map(function (c) { return { label: c.label, color: c.color } })))
     html.push('</section>')
   }

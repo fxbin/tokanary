@@ -28,10 +28,43 @@ export function dateShort(ts: number): string {
   return (d.getMonth() + 1) + '/' + d.getDate()
 }
 
+/* SVG 文字宽度估算（viewBox 单位）。中日韩与全角标点按 1em，其余按 0.55em，
+   与 ui.css 的 .lbl(12.5px) / .lbl-sub(10.5px) / .val(12px) 对齐。
+   量宽而不是写死 labelW：工具名长度差很多（「pi」与
+   「DeepSeek Harness（DSH Desktop）」差 17 倍），写死宽度短的那个就把长标签
+   压在柱子上 —— .chart 是 overflow: visible，溢出的文字不会被裁掉，只会盖住柱子。 */
+export function textUnits(s: string, fontSize: number): number {
+  let u = 0
+  const str = String(s == null ? '' : s)
+  for (let i = 0; i < str.length; i++) {
+    u += /[ᄀ-ᅟ⺀-〾ぁ-㏿㐀-䶿一-鿿ꀀ-꓏가-힣豈-﫿︰-﹏＀-｠￠-￦]/.test(str.charAt(i)) ? 1 : 0.55
+  }
+  return u * fontSize
+}
+
+const LBL_FS = 12.5, SUB_FS = 10.5, VAL_FS = 12
+
 export function stackBar(items: StackItem[], opts: { rowH?: number; labelW?: number; rightW?: number } = {}): string {
   // items: [{label, sub, segments:[{v,color,name}], totalText}]
-  const rowH = opts.rowH || 34, gap = 10, labelW = opts.labelW || 190, rightW = opts.rightW || 84
-  const w = 900, plotW = w - labelW - rightW
+  const rowH = opts.rowH || 34, gap = 10
+  const w = 900
+  const PAD = 12
+  // 调用方传的 labelW/rightW 只当下限；实测不够时按内容撑开
+  let needLabel = opts.labelW || 0
+  let needRight = opts.rightW || 0
+  for (const it of items) {
+    needLabel = Math.max(needLabel, textUnits(it.label, LBL_FS))
+    if (it.sub) needLabel = Math.max(needLabel, textUnits(it.sub, SUB_FS))
+    needRight = Math.max(needRight, textUnits(it.totalText, VAL_FS))
+  }
+  // 标签栏最多占三分之一，否则短条的绘图区被挤没；超出部分截断加省略号
+  const labelCap = w * 0.34
+  let labelW = Math.min(needLabel + PAD, labelCap)
+  const rightW = Math.min(needRight + PAD, w * 0.28)
+  const clipLabel = function (s: string, fs: number): string {
+    return textUnits(s, fs) > labelW - PAD ? s.slice(0, Math.max(1, Math.floor((labelW - PAD) / fs))) + '…' : s
+  }
+  const plotW = w - labelW - rightW
   const h = items.length * (rowH + gap) + 14
   const segSumOf = function (it: StackItem): number {
     return it.segments.reduce(function (t, s) { return t + Math.max(0, s.v) }, 0)
@@ -46,11 +79,13 @@ export function stackBar(items: StackItem[], opts: { rowH?: number; labelW?: num
     const y = idx * (rowH + gap) + 6
     const scale = scaleOf(it)
     const bw = Math.max(2, scale / max * plotW)
-    out.push('<text x="0" y="' + (y + 13) + '" class="lbl">' + esc(it.label) + '</text>')
-    if (it.sub) out.push('<text x="0" y="' + (y + 28) + '" class="lbl-sub">' + esc(it.sub) + '</text>')
+    out.push('<text x="0" y="' + (y + 13) + '" class="lbl">' + esc(clipLabel(it.label, LBL_FS)) + '</text>')
+    if (it.sub) out.push('<text x="0" y="' + (y + 28) + '" class="lbl-sub">' + esc(clipLabel(it.sub, SUB_FS)) + '</text>')
     let x = labelW
     const segs = it.segments.filter(function (s) { return s.v > 0 })
-    if (!segs.length) {
+    // 「没有分段」才画那根 2 单位灰标；但整行量级为 0 时连标都不画 —— 一个恒为 0
+    // 的条配着一根竖线，读起来像「有一点点用量」，实际是没有。
+    if (!segs.length && scale > 0) {
       out.push('<rect x="' + labelW + '" y="' + y + '" width="2" height="' + (rowH - 8) + '" fill="var(--dim)" opacity=".4"/>')
     }
     const denom = scale || 1
