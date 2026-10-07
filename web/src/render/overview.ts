@@ -7,7 +7,7 @@ import {
   type PricingOpts, type PriceSource, type RangeKey
 } from '../pricing'
 import { MODEL_COLORS, stackBar, donut, legend, dayChart, heatmap, trimNum } from '../charts'
-import { windowUsage, USAGE_WINDOWS, type WindowUsage } from '../usage'
+import { windowUsage, type WindowUsage } from '../usage'
 import { th, sourceTag, stableColorIndex, sesRecency, pad2, localDay, esc, type UiState } from './shared'
 
 export function renderOverview(data: any, st: UiState, cmp: Record<string, number>, range: RangeKey): string {
@@ -77,27 +77,42 @@ export function renderOverview(data: any, st: UiState, cmp: Record<string, numbe
   /* 窗口用量：各家额度存在服务端，本机读不到，所以只报实测用量，不给百分比。
      旧稿这块叫「限额」，让用户先填一个上限再拿实测 token 去除 —— 分母是随手编的
      数字，612.35M tok 除以它得到的百分比，精度全看填得准不准，界面却写得像在
-     报告事实。默认状态下它还恒显三行「额度上限未设置」。 */
+     报告事实。默认状态下它还恒显三行「额度上限未设置」。
+
+     版式上踩过三个坑，一并记在这里：
+       - 每行重复「近 7 天 / 近 30 天」标签且不对齐，只能横着读；改成表头 + 网格。
+       - 某个窗口无用量时整格省略，换行后下一格的数贴到了上一个工具身上；缺值写
+         「无用量」，位置留着。
+       - 两个窗口是嵌套的（近 30 天含近 7 天），并排列出会诱导读者相减；注释点破。
+     金额那列的单位价跨工具差 40 倍以上（模型构成不同），不能当花费排序用，
+     所以表头写明「API 等价 $」而不是「费用」。 */
   {
     const usage = windowUsage(data, st.policy)
     if (usage.length) {
       const shown = usage.slice(0, 5)
       const rest = usage.length - shown.length
+      const num = function (s: string, cls: string) { return '<div class="' + cls + '">' + s + '</div>' }
       html.push('<div class="note win-note"><b>窗口用量</b> ' +
-        '<span class="dim small">近 7 天 / 近 30 天 · 锚定最新数据日，不随上方范围切换</span>' +
-        '<div class="win-list">' + shown.map(function (u: WindowUsage) {
-          return '<span class="wsum"><b class="w-label">' + esc(u.label) + '</b>' +
-            USAGE_WINDOWS.map(function (w) {
-              const x = u.byWindow[w.key]
-              if (!x || !(x.tokens > 0)) return ''
-              return '<i class="w-win">' + esc(w.label) + '</i>' +
-                '<span class="w-val">' + fmt(x.tokens) + ' · ' + money(x.cost) + '</span>'
-            }).join('') + '</span>'
-        }).join('') +
-        (rest > 0 ? '<span class="dim small">…另有 ' + rest + ' 个工具近 30 天有用量，见跨工具总览</span>' : '') +
-        '</div>' +
+        '<span class="dim small">锚定最新数据日，不随上方范围切换</span>' +
+        '<div class="win-grid">' +
+        '<div class="win-h win-h-name">工具</div>' +
+        '<div class="win-h win-h-n">近 7 天</div>' +
+        '<div class="win-h win-h-n">近 30 天</div>' +
+        '<div class="win-h win-h-n">近 7 天 API 等价 $</div>' +
+        shown.map(function (u: WindowUsage) {
+          const w7 = u.byWindow['7d']
+          const w30 = u.byWindow['30d']
+          const none = '无用量'
+          return num(esc(u.label), 'win-name') +
+            num(w7 && w7.tokens > 0 ? fmt(w7.tokens) : none, w7 && w7.tokens > 0 ? 'win-n' : 'win-none') +
+            num(w30 && w30.tokens > 0 ? fmt(w30.tokens) : none, w30 && w30.tokens > 0 ? 'win-n' : 'win-none') +
+            num(w7 && w7.tokens > 0 ? money(w7.cost) : none, w7 && w7.tokens > 0 ? 'win-n' : 'win-none')
+        }).join('') + '</div>' +
+        (rest > 0 ? '<div class="dim small">…另有 ' + rest + ' 个工具近 30 天有用量，见跨工具总览</div>' : '') +
         '<div class="note-inline dim small">这是从本机用量日志实测的用量，不是各家订阅额度 —— 额度在服务端，本机读不到。' +
-        '费用是按 models.dev 均价折算的 API 等价成本，订阅制下你实际付的不是这个数。' +
+        '两个窗口是嵌套的：近 30 天含近 7 天，不是两段不相交的时间。' +
+        '金额是按 models.dev 均价折算的 API 等价成本，订阅制下你实际付的不是这个数；' +
+        '各工具的综合单价因模型构成不同能差几十倍，这一列不能用来排谁更费钱。' +
         '本机工具的花费提醒在<a href="#/settings?range=all">设置页</a>的月预算。</div></div>')
     }
   }

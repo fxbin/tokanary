@@ -270,20 +270,28 @@ footer.foot { max-width: 1360px; margin: 8px auto 0; color: var(--dim); font-siz
 }
 
 /* 窗口用量（总览一行摘要）。报的是实测用量，不是订阅额度 —— 各家额度在服务端，
-   本机读不到；旧稿让用户自填上限再拿实测 token 去除，那个百分比的分母是编的。 */
+   本机读不到；旧稿让用户自填上限再拿实测 token 去除，那个百分比的分母是编的。
+   表头只出现一次，缺值写「无用量」占住格子：省略整格会让下一格的数贴到上一行身上。 */
 .win-note { line-height: 1.7; }
-.win-list { display: flex; flex-wrap: wrap; gap: 4px 18px; margin: 6px 0 2px; }
-.win-note .wsum { display: inline-flex; align-items: baseline; gap: 6px; }
-.win-note .w-label { font-weight: 600; font-size: 12.5px; }
-.win-note .w-win {
-  margin-left: 4px; font-style: normal; font-size: 10.5px;
-  color: var(--dim); font-weight: 400;
+.win-grid {
+  display: grid; grid-template-columns: minmax(0, 1.5fr) repeat(3, minmax(0, 1fr));
+  gap: 2px 16px; margin: 7px 0 3px;
 }
-.win-note .w-val {
-  font-variant-numeric: tabular-nums; font-size: 12.5px;
-  color: var(--fg); font-weight: 600;
+.win-h {
+  font-size: 10.5px; color: var(--dim); font-weight: 400;
+  border-bottom: 1px solid var(--line); padding-bottom: 4px; margin-bottom: 2px;
 }
-.win-note .note-inline { margin-top: 6px; }
+.win-h-n { text-align: right; }
+.win-name {
+  font-size: 12.5px; font-weight: 600;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.win-n {
+  text-align: right; font-variant-numeric: tabular-nums;
+  font-size: 12.5px; font-weight: 600;
+}
+.win-none { text-align: right; font-size: 11.5px; color: var(--dim); }
+.win-note .note-inline { margin-top: 8px; line-height: 1.65; }
 
 /* 产出 · git：0 提交的仓库折进 details，不在首层铺开 */
 .yield-zero { margin-top: 12px; font-size: 12.5px; }
@@ -298,8 +306,8 @@ footer.foot { max-width: 1360px; margin: 8px auto 0; color: var(--dim); font-siz
    旧稿里的 760/640px 档在 MinWidth 900 下永不触发，已删；触控目标同理（见上方注释）。
    窄档一律「收窄 + 换行」，不靠隐藏列——账本丢列等于丢数据。 */
 @media (max-width: 1100px) {
-  /* 窗口用量：窄档收间距，token 数与金额永远留着 */
-  .win-list { gap: 4px 12px; }
+  /* 窗口用量：窄档先收列间距，列头与数值都保留 */
+  .win-grid { gap: 2px 10px; }
   /* 本周 Top：收固定列宽，百分比列保留 */
   .week-row { grid-template-columns: 12px minmax(96px, 2fr) 3fr 64px 72px 48px; gap: 8px; font-size: 12px; }
   /* 费用明细六列：收窄而非截断 */

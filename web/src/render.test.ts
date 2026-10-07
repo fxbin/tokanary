@@ -179,8 +179,10 @@ suite('总览：窗口用量（不再假装知道额度）', () => {
   it('把「这是用量不是额度」和费用口径写在明面上', () => {
     const html = overview('all')
     expect(html).toContain('不是各家订阅额度')
-    expect(html).toContain('API 等价成本')
+    expect(html).toContain('API 等价')
     expect(html).toContain('不随上方范围切换')
+    // 两个窗口嵌套、并排列会诱导相减；这一点必须在界面上点破
+    expect(html).toContain('两个窗口是嵌套的')
   })
 
   it('窗口标签只给算得出来的：近 7 天 / 近 30 天，不出现 5 小时', () => {
@@ -190,6 +192,28 @@ suite('总览：窗口用量（不再假装知道额度）', () => {
     expect(html).toContain('近 30 天')
     expect(html).not.toContain('5 小时')
     expect(html).not.toContain('5h')
+  })
+
+  it('窗口标签只出现在表头一次，不再每行重复', () => {
+    // 旧稿每个工具重复「近 7 天 / 近 30 天」两个标签且不对齐，只能横着读
+    const html = overview('all')
+    expect((html.match(/class="win-h/g) || []).length).toBe(4)
+    expect(html).toContain('>近 7 天<')
+    expect(html).toContain('>近 30 天<')
+    // 金额列表头必须写明是 API 等价，不能读成实际账单
+    expect(html).toContain('近 7 天 API 等价 $')
+  })
+
+  it('某窗口无用量时写「无用量」占位，不省略整格', () => {
+    // 省略整格会让换行后下一格的数贴到上一个工具身上。首屏只列前 5 个工具，
+    // 被截掉的要另计。
+    const u = windowUsage(DATA, st.policy)
+    const shown = u.slice(0, 5)
+    const zero7d = shown.filter((x) => x.byWindow['7d'].tokens === 0)
+    const html = overview('all')
+    // 近 7 天 token 格与近 7 天金额格各一个「无用量」；近 30 天格有值
+    expect((html.match(/class="win-none">无用量<\/div>/g) || []).length).toBe(zero7d.length * 2)
+    if (u.length > shown.length) expect(html).toContain('另有 ' + (u.length - shown.length) + ' 个工具')
   })
 
   it('工具行按近 30 天 token 降序，且每个工具带窗口标签与 token/金额', () => {
