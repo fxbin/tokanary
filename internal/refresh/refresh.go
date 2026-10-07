@@ -74,17 +74,10 @@ func fingerprintFiles(files []string) Fingerprint {
 	return fp
 }
 
-var lastTouch time.Time
-
 // Touch incrementally refreshes external-usage.json and rebuilds the
 // warehouse when the pi source changed. Safe to call on every dashboard poll.
 func Touch(repoRoot string) (Result, error) {
 	var res Result
-	// Rate-limit: avoid re-scanning large agent DBs on every UI poll.
-	if time.Since(lastTouch) < 15*time.Second {
-		return res, nil
-	}
-	defer func() { lastTouch = time.Now() }()
 	if repoRoot == "" {
 		return res, fmt.Errorf("refresh: repoRoot required")
 	}

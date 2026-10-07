@@ -10,6 +10,7 @@
 package main
 
 import (
+	"time"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -50,6 +51,7 @@ const fallbackHTML = `<!doctype html>
 // asset server at /api so the WebView can fetch() it same-origin.
 type APIService struct {
 	repoRoot string
+	lastTouch time.Time
 }
 
 func (s *APIService) ServiceName() string { return "dashboard" }
