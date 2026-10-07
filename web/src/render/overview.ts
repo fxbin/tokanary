@@ -3,7 +3,7 @@ import {
   normalizeCost, costOfTokens, computeAll, compareSources,
   dailyCost, externalSummary, rangeStats, rangeExt, rangeAnchor, withMergedDays, mergeDailyCost,
   filterHoursByRange, hourMatrix, rangeInsights, RANGES,
-  filterDaysByRange, rangeCutoffKey, calcStreak, weekTopModels,
+  filterDaysByRange, rangeCutoffKey, calcStreak, weekTopModels, isoWeekRange, mergeDailyUsage,
   type PricingOpts, type PriceSource, type RangeKey
 } from '../pricing'
 import { MODEL_COLORS, stackBar, donut, legend, dayChart, heatmap, trimNum } from '../charts'
@@ -42,15 +42,19 @@ export function renderOverview(data: any, st: UiState, cmp: Record<string, numbe
     { label: '单日最低', value: money(rs.minCost), sub: rs.minDay || '—' },
     { label: '缓存命中率', value: pct(rs.cacheHitPct), sub: '范围内缓存读占比' }
   ]
-  // streak / week-top: pi day series only — use that series last day
-  const piLast = ((data.days || []) as any[]).map((d: any) => d.d).filter(Boolean).sort().pop() || anchor
-  const stk = calcStreak(data.days || [], piLast)
+  /* 连续活跃按「全工具」合并序列算，锚点用页面的 rangeAnchor。
+     旧稿取 data.days（只含 pi）并把锚点定成 pi 自己的最后一天，于是 pi 停在 09-20
+     时读成「2 天 · 至 09-20」，而外部 CLI 一直用到 10-07 —— 真实连段是 30 天。
+     同一行左边六格都是全工具口径，这一格不能例外。
+     连段长度是绝对事实，不随范围切换（7 天窗口装不下 30 天的连段，硬裁只会
+     永远显示满格），范围由 sub 里的终点日期自证。 */
+  const stk = calcStreak(mergeDailyUsage(data), anchor)
   /* 「连续活跃」不再占一格 KPI。7 个格子在 1196px 的内容宽下按 180px 基准只排得下 6 个，
    * 落单那格会被 flex-grow 拉成整行宽的巨型空块。降级成走势行左侧的状态注记，
    * 顺手给原来只挂在 title 上的 sparkline 补一句文字标签（见 ui.css 的 .spark-row）。 */
   const streakCell = '<div class="kpi kpi-note"><div class="kpi-l">连续活跃</div>' +
     '<div class="kpi-v">' + (stk.streak > 0 ? stk.streak + ' 天' : '—') + '</div>' +
-    '<div class="kpi-s">' + (stk.endDate ? '至 ' + esc(stk.endDate) : '断档或暂无数据') + '</div></div>'
+    '<div class="kpi-s">' + (stk.endDate ? '全工具 · 至 ' + esc(stk.endDate) : '全工具 · 断档或暂无数据') + '</div></div>'
   /* 1px 迷你 sparkline(ns-003):范围内逐日 token 归一走势 */
   const heroSpark = (function () {
     if (rs.days.length < 2) return ''
@@ -141,20 +145,20 @@ html.push('<section class="card insights">')
   }).join('') + '</div>')
   html.push('</section>')
 
-  /* 本周 Top 模型(U6):数据最大日所在 ISO 周(周一起) */
-  const weekTop = weekTopModels(data, s, piLast)
-  const weekStartNote = (function () {
-    if (!anchor) return ''
-    const t = new Date(anchor + 'T00:00:00').getTime()
-    if (isNaN(t)) return ''
-    const back = (new Date(t).getDay() + 6) % 7
-    const ws = new Date(t - back * 86400000)
-    const pad = function (x: number) { return String(x).padStart(2, '0') }
-    return ws.getFullYear() + '-' + pad(ws.getMonth() + 1) + '-' + pad(ws.getDate()) + ' ~ ' + anchor
-  })()
+  /* 本周 Top 模型(U6)。
+     锚点用 pi 侧最后一天：dayModel 只有 pi 有，外部工具只有逐日合计与逐模型合计，
+     没有逐日逐模型，用全工具锚点会算出一个空周。表头与聚合共用 isoWeekRange 且共用
+     同一个 weekAnchor —— 旧稿表头按页面 anchor（10-07）算、数据按 piLast（09-20）算，
+     于是表头写着 10-05~10-07，列的却是 09-15~09-20 的模型，声明了一个没有数据的周。 */
+  const piLast = ((data.days || []) as any[]).map((d: any) => d.d).filter(Boolean).sort().pop() || anchor
+  const weekAnchor = piLast
+  const weekTop = weekTopModels(data, s, weekAnchor)
+  const wk = isoWeekRange(weekAnchor)
+  const weekStartNote = wk ? wk.start + ' ~ ' + wk.end : ''
   html.push('<section class="card">')
   html.push('<h2>本周 Top 模型 <span class="hint">' +
-    esc(weekStartNote || '以数据最大日所在周计') + ' · 按费用降序 · token 精确聚合</span></h2>')
+    esc(weekStartNote || '以数据最大日所在周计') +
+    ' · 仅 pi 侧 dayModel · 按费用降序 · token 精确聚合</span></h2>')
   if (!weekTop.length) {
     html.push('<div class="empty">本周暂无数据 —— dayModel 缺失或该周无用量。</div>')
   } else {

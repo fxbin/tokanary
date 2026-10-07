@@ -5,7 +5,7 @@ import {
   computeAll, compareSources, dailyCost, defaultOpts, money,
   externalSummary, rangeExt,
   rangeStats, filterDaysByRange, rangeCutoffKey, rangeAnchor,
-  filterHoursByRange, hourMatrix, rangeInsights, calcStreak, weekTopModels,
+  filterHoursByRange, hourMatrix, rangeInsights, calcStreak, weekTopModels, isoWeekRange,
   type RangeKey
 } from './pricing'
 import { renderOverview, renderModels, renderSessions, renderProjects, renderSettings, budgetAlertHtml, defaultUiState } from './render'
@@ -539,6 +539,65 @@ describe('U6 streak', () => {
     const s = calcStreak(DATA.days || [], piLast)
     expect(s.streak).toBeGreaterThanOrEqual(1)
     expect(s.endDate).toBeTruthy()
+  })
+})
+
+/* 连续活跃曾经只取 data.days（只含 pi）并把锚点定成 pi 自己的最后一天。
+ * 真实数据里 pi 停在 2026-09-20、外部 CLI 用到 10-07，页面上读成
+ * 「2 天 · 至 09-20」，而全工具连段是 30 天。 */
+describe('连续活跃：全工具口径', () => {
+  const ext = (days: string[]) => ({
+    generatedAt: '', convention: '', totals: {}, tools: [{ tool: 'x', label: 'X', models: [], days: days.map((d) => ({ d, total: 10, input: 10, output: 0, cacheRead: 0, cacheWrite: 0 })) }], prices: {}
+  })
+
+  it('pi 早早停更、外部仍在用时，连段必须延伸到页面锚点', () => {
+    const data: any = {
+      days: [{ d: '2026-10-01', total: 5 }, { d: '2026-10-02', total: 5 }],
+      external: ext(['2026-10-03', '2026-10-04', '2026-10-05'])
+    }
+    // 页面锚点 = 全工具最大日 10-05；旧稿取 piLast=10-02 会读成 2 天
+    const s = calcStreak(mergeDailyUsage(data), rangeAnchor(data))
+    expect(s.streak).toBe(5)
+    expect(s.endDate).toBe('2026-10-05')
+    // 对照：只看 pi 侧确实只有 2 天，说明这个 bug 确实被数据形态掩盖
+    expect(calcStreak(data.days, '2026-10-02').streak).toBe(2)
+  })
+
+  itLive('总览页的连续活跃走全工具：终点 = 页面锚点，且与合并序列算出的值一致', () => {
+    const s = calcStreak(mergeDailyUsage(DATA), rangeAnchor(DATA))
+    expect(s.streak).toBeGreaterThan(0)
+    expect(s.endDate).toBe(rangeAnchor(DATA))
+    const html = renderOverview(DATA, defaultUiState(), compareSources(DATA, defaultUiState()), 'all')
+    expect(html).toContain(s.streak + ' 天')
+    expect(html).toContain('全工具 · 至 ' + s.endDate)
+  })
+})
+
+/* 表头与聚合曾各算一遍「本周」：表头按全工具锚点（10-07）算成 10-05~10-07，
+ * 列表按 pi 锚点（09-20）算成 09-15~09-20 —— 表头声明了一个没有数据的周。 */
+describe('本周 Top：表头窗口必须与列表同源', () => {
+  it('isoWeekRange 周一为起点，跨月不串', () => {
+    expect(isoWeekRange('2026-09-16')).toEqual({ start: '2026-09-14', end: '2026-09-16' })
+    expect(isoWeekRange('2026-10-07')).toEqual({ start: '2026-10-05', end: '2026-10-07' })
+    // 周日属于上一周
+    expect(isoWeekRange('2026-09-20')).toEqual({ start: '2026-09-14', end: '2026-09-20' })
+    expect(isoWeekRange(null)).toBeNull()
+  })
+
+  itLive('总览表头写的那一周，就是 weekTopModels 实际聚合的那一周', () => {
+    const st = defaultUiState()
+    const s = computeAll(DATA, st)
+    const piLast = ((DATA.days || []) as any[]).map((d: any) => d.d).filter(Boolean).sort().pop()
+    const rows = weekTopModels(DATA, s, piLast)
+    if (!rows.length) return // 夹具里 pi 侧最近一周没有 dayModel，本例不适用
+    const wk = isoWeekRange(piLast)!
+    const html = renderOverview(DATA, st, compareSources(DATA, st), 'all')
+    // 表头写 wk.start ~ wk.end；且不再出现页面锚点那一周（那里没有任何 dayModel）
+    expect(html).toContain(wk.start + ' ~ ' + wk.end)
+    const otherWk = isoWeekRange(rangeAnchor(DATA))!
+    if (otherWk.start !== wk.start) expect(html).not.toContain(otherWk.start + ' ~ ' + otherWk.end)
+    // 范围写明只覆盖 pi 侧 dayModel
+    expect(html).toContain('仅 pi 侧 dayModel')
   })
 })
 

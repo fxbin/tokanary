@@ -251,20 +251,33 @@ export function calcStreak(days: any[], anchor?: string | null): { streak: numbe
 
 export interface WeekTopRow { key: string; token: number; cost: number; share: number }
 
-/** 数据最大日所在 ISO 周(周一为起点)内 dayModel 聚合,按 cost 降序 Top5。无 dayModel 返回 []。 */
+/** anchor 所在 ISO 周(周一为起点)的首末日。表头与聚合必须共用这一个函数：两处各自
+ *  算一遍「本周」，就会出现表头声明了一个没有任何数据的周。 */
+export function isoWeekRange(anchor?: string | null): { start: string; end: string } | null {
+  if (!anchor) return null
+  const t = new Date(anchor + 'T00:00:00').getTime()
+  if (isNaN(t)) return null
+  const pad = function (x: number) { return String(x).padStart(2, '0') }
+  const key = function (ms: number) {
+    const d = new Date(ms)
+    return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate())
+  }
+  // 周一为一周起点:JS getDay() 0=Sun → 偏移 (day+6)%7
+  const back = (new Date(t).getDay() + 6) % 7
+  return { start: key(t - back * 86400000), end: key(t) }
+}
+
+/** 数据最大日所在 ISO 周(周一为起点)内 dayModel 聚合,按 cost 降序 Top5。无 dayModel 返回 []。
+ *  数据源只有 pi 的 dayModel —— 外部工具只有逐日合计与逐模型合计，没有逐日逐模型，
+ *  所以调用方必须把锚点传成 pi 侧最后一天；传全工具锚点会算出一个空周。 */
 export function weekTopModels(data: any, summary: { rows: any[] }, anchor?: string | null): WeekTopRow[] {
   const dm = data && data.dayModel
   if (!Array.isArray(dm) || !dm.length) return []
   const a = anchor || rangeAnchor(data)
   if (!a) return []
-  const t = new Date(a + 'T00:00:00').getTime()
-  if (isNaN(t)) return []
-  // 周一为一周起点:JS getDay() 0=Sun → 偏移 (day+6)%7
-  const dow = new Date(t).getDay()
-  const back = (dow + 6) % 7
-  const weekStart = new Date(t - back * 86400000)
-  const pad = function (x: number) { return String(x).padStart(2, '0') }
-  const startKey = weekStart.getFullYear() + '-' + pad(weekStart.getMonth() + 1) + '-' + pad(weekStart.getDate())
+  const wk = isoWeekRange(a)
+  if (!wk) return []
+  const startKey = wk.start
   const unitByKey: Record<string, number> = {}
   ;(summary.rows || []).forEach(function (r: any) {
     if (r.m && r.m.key) unitByKey[r.m.key] = r.unit || 0
