@@ -1,18 +1,20 @@
 /* 青簡 Token · 纸/夜 */
-/* 霁青唯一主色；六味语义。旧变量名保留作兼容别名。 */
+/* 霁青唯一主色；六味语义。旧变量名保留作兼容别名。
+ * --chart-c0..c5 是图元专用色槽：槽位顺序的语义定义在 web/src/palette.ts，
+ * 这里只给每个主题填值（CSS 读不到 TS，六味的语义归属一律回 palette.ts）。 */
 :root, :root[data-theme="light"] {
   --bg: #FBF8F5;
   --card: #FFFCF9;
   --sunken: #F3F0EB;
   --hover: #F6F3ED;
   --fg: #292624;
-  --dim: #837F7D;
+  --dim: #6C6865;
   --line: #E5E1DA;
   --line-2: #D2CDC3;
-  --accent: #46839D;
+  --accent: #3C7286;
   --accent-ink: #2E6880;
   --accent-2: #84B6CE;
-  --qing: #46839D;
+  --qing: #3C7286;
   --qing-h: #2E6880;
   /* 六味语义 */
   --c-input: #489499;
@@ -34,6 +36,17 @@
   --ok: #779E77;
   --warn: #C69C68;
   --err: #B3688A;
+  /* 图元色槽：语义顺序同 palette.ts MODEL_COLORS（缓存读/写 · 输入 · 输出 · 推理 · 实时）。
+   * 能别名到语义 token 的直接别名，色相不在此处另立；仅 c0/c1 这一对缓存双档
+   * （大面积 400 档 与 本色）在两套主题里取值不同，各自给字面量。 */
+  --chart-c0: #B0D2B0;      /* 缓存读 · 石绿 400 大面积档 */
+  --chart-c1: var(--c-cache); /* 缓存写 · 石绿本色 */
+  --chart-c2: var(--c-input);
+  --chart-c3: var(--c-output);
+  --chart-c4: var(--c-reason);
+  --chart-c5: var(--c-realtime);
+  /* 横滚渐隐提示（.tbl-wrap 右侧还有内容时显影） */
+  --scroll-hint: rgba(74, 60, 40, .18);
   --shadow: 0 18px 48px -20px rgba(74, 60, 40, .25), 0 2px 10px -3px rgba(74, 60, 40, .1);
   --glass-blur: 14px;
   --glass-tint: rgba(255, 252, 249, .58);
@@ -42,11 +55,11 @@
   --wash-1: rgba(41, 38, 36, .03);
   --wash-2: rgba(41, 38, 36, .045);
   --wash-3: rgba(41, 38, 36, .07);
-  --accent-a07: rgba(70, 131, 157, .07);
-  --accent-a10: rgba(70, 131, 157, .1);
-  --accent-a14: rgba(70, 131, 157, .14);
-  --accent-a30: rgba(70, 131, 157, .3);
-  --accent-a40: rgba(70, 131, 157, .4);
+  --accent-a07: rgba(60, 114, 134, .07);
+  --accent-a10: rgba(60, 114, 134, .1);
+  --accent-a14: rgba(60, 114, 134, .14);
+  --accent-a30: rgba(60, 114, 134, .3);
+  --accent-a40: rgba(60, 114, 134, .4);
 }
 
 @media (prefers-color-scheme: dark) {
@@ -83,6 +96,16 @@
     --ok: #B0D2B0;
     --warn: #E2B986;
     --err: #E4A0BD;
+    /* 图元色槽：夜取 400 档亮色（非反相）；c0 用夜·缓存 #B0D2B0，
+     * c1 取石绿 #779E77 作低一档，保证缓存读/写两段仍可分 */
+    --chart-c0: var(--c-cache);
+    --chart-c1: #779E77;
+    --chart-c2: var(--c-input);
+    --chart-c3: var(--c-output);
+    --chart-c4: var(--c-reason);
+    --chart-c5: var(--c-realtime);
+    /* 夜面近黑，渐隐提示改走月白侧（纯黑影在 #14110F 上等于没有） */
+    --scroll-hint: rgba(242, 237, 227, .12);
     --shadow: 0 20px 54px -20px rgba(0, 0, 0, .72);
     --glass-tint: rgba(22, 19, 16, .52);
     --glass-hi: rgba(242, 237, 227, .07);
@@ -126,6 +149,14 @@
   --ok: #B0D2B0;
   --warn: #E2B986;
   --err: #E4A0BD;
+  /* 图元色槽：与 prefers-color-scheme 夜块逐值一致 */
+  --chart-c0: var(--c-cache);
+  --chart-c1: #779E77;
+  --chart-c2: var(--c-input);
+  --chart-c3: var(--c-output);
+  --chart-c4: var(--c-reason);
+  --chart-c5: var(--c-realtime);
+  --scroll-hint: rgba(242, 237, 227, .12);
   --shadow: 0 20px 54px -20px rgba(0, 0, 0, .72);
   --glass-tint: rgba(22, 19, 16, .52);
   --glass-hi: rgba(242, 237, 227, .07);

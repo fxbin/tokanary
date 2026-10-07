@@ -1,13 +1,13 @@
 import {
   fmt, money, pct, esc, CATS, POLICIES, SOURCES,
-  normalizeCost, costOfTokens, computeAll, compareSources,
+  normalizeCost, costOfTokens, computeAll, compareSources, canonicalModelKey,
   dailyCost, externalSummary, rangeStats, rangeExt, rangeAnchor,
   filterHoursByRange, hourMatrix, rangeInsights, RANGES,
   filterDaysByRange, rangeCutoffKey, calcStreak, weekTopModels,
-  type PricingOpts, type PriceSource, type RangeKey
+  type PricingOpts, type PriceSource, type Policy, type RangeKey
 } from '../pricing'
 import { MODEL_COLORS, stackBar, donut, legend, dayChart, heatmap, trimNum } from '../charts'
-import { th, sourceTag, stableColorIndex, sesRecency, pad2, localDay, type UiState } from './shared'
+import { th, sourceTag, stableColorIndex, sesRecency, pad2, localDay, emptyStateHtml, type UiState } from './shared'
 
 /**
  * 范围内按 model key 聚合：pi 的 dayModel 精确 + external 各工具按
@@ -54,9 +54,11 @@ function rangeModelAgg(data: any, range: RangeKey): Record<string, { total: numb
       const share = Number(m.total || 0) / allTok
       const tok = Math.round(rangeTok * share)
       if (tok <= 0) continue
-      let e = out[m.id]
+      // key 与 externalModelRows / piRows 用同一套归一化,否则 donut 取不到范围内 token
+      const key = canonicalModelKey(String(m.id))
+      let e = out[key]
       if (!e) {
-        e = out[m.id] = { total: 0, fields: { cacheRead: 0, cacheWrite: 0, input: 0, output: 0 } }
+        e = out[key] = { total: 0, fields: { cacheRead: 0, cacheWrite: 0, input: 0, output: 0 } }
       }
       const scale = Number(m.total || 0) ? share : 1
       e.total += tok
@@ -65,6 +67,66 @@ function rangeModelAgg(data: any, range: RangeKey): Record<string, { total: numb
       e.fields.input += Math.round(Number(m.input || 0) * scale * (rangeTok / allTok))
       e.fields.output += Math.round(Number(m.output || 0) * scale * (rangeTok / allTok))
     }
+  }
+  return out
+}
+
+export interface ExtModelRow {
+  key: string
+  total: number
+  cacheRead: number
+  cacheWrite: number
+  input: number
+  output: number
+  unit: number
+  source: string
+  priced: boolean
+}
+
+/**
+ * 外部工具模型行:单价不自己算,直接复用 externalSummary 里已经算好的
+ * per-model cost(unit = cost / total × 1e6,按该模型真实四段 token 构成加权,
+ * 缺价按 policy 走既有 normalizeCost 补全)。绝对不能用四档单价的算术平均:
+ * 缓存占 9 成以上的模型会被算成花钱主力。
+ *
+ * key 走 canonicalModelKey(镜像 pi 侧入库时的 model_canon),同一原始 id 常同时
+ * 出现在多个工具(如 deepseek-v4-flash 在 5 个工具里),按归一化 key 归并后
+ * unit 按合并后的真实构成加权。
+ */
+export function externalModelRows(data: any, policy: Policy): ExtModelRow[] {
+  const out: ExtModelRow[] = []
+  const ext = externalSummary(data, policy)
+  if (!ext) return out
+  const byKey: Record<string, ExtModelRow & { cost: number }> = {}
+  const keys: string[] = []
+  for (const er of ext.rows) {
+    for (const m of er.models || []) {
+      const key = canonicalModelKey(String(m.id))
+      let e = byKey[key]
+      if (!e) {
+        e = byKey[key] = { key, total: 0, cacheRead: 0, cacheWrite: 0, input: 0, output: 0, unit: 0, source: 'missing', priced: false, cost: 0 }
+        keys.push(key)
+      }
+      e.total += Number(m.tok.total || 0)
+      e.cacheRead += Number(m.tok.cacheRead || 0)
+      e.cacheWrite += Number(m.tok.cacheWrite || 0)
+      e.input += Number(m.tok.input || 0)
+      e.output += Number(m.tok.output || 0)
+      e.cost += Number(m.cost || 0)
+      if (m.priced) {
+        e.priced = true
+        e.source = (m.price && m.price.source) || 'models.dev'
+      }
+    }
+  }
+  for (const key of keys) {
+    const e = byKey[key]
+    out.push({
+      key, total: e.total, cacheRead: e.cacheRead, cacheWrite: e.cacheWrite,
+      input: e.input, output: e.output,
+      unit: e.total > 0 ? e.cost / e.total * 1e6 : 0,
+      source: e.source, priced: e.priced
+    })
   }
   return out
 }
@@ -90,24 +152,16 @@ export function renderModels(data: any, st: UiState, cmp: Record<string, number>
     }
   })
   const piKeySet = new Set(piRows.map(function (r) { return r.key }))
-  const extMeta: Record<string, { unit: number; source: string }> = {}
-  for (const t of data?.external?.tools || []) {
-    const prices = (data.external && data.external.prices) || {}
-    for (const m of t.models || []) {
-      const key = String(m.id)
-      const pr = prices[key] || {}
-      const cost = pr.cost || {}
-      const unit = ((cost.input || 0) + (cost.output || 0) + (cost.cache_read || 0) + (cost.cache_write || 0)) / 4
-      extMeta[key] = { unit: unit || 0, source: pr.source || 'missing' }
-      if (!piKeySet.has(key)) {
-        piRows.push({
-          key, total: Number(m.total || 0), turns: 0,
-          cacheRead: Number(m.cacheRead || 0), cacheWrite: Number(m.cacheWrite || 0),
-          input: Number(m.input || 0), output: Number(m.output || 0),
-          unit: unit || 0, source: pr.source || 'missing'
-        })
-      }
-    }
+  // 外部模型的 unit 由 externalSummary 给出(按真实四段构成加权),与 pi 侧 computeAll 同式
+  const extRows = externalModelRows(data, st.policy)
+  for (const e of extRows) {
+    // pi 已有的 key 不再重复出行;它与 pi 的 token 在 rangeModelAgg 里并到同一行
+    if (piKeySet.has(e.key)) continue
+    piRows.push({
+      key: e.key, total: e.total, turns: 0,
+      cacheRead: e.cacheRead, cacheWrite: e.cacheWrite, input: e.input, output: e.output,
+      unit: e.unit, source: e.source
+    })
   }
 
   const colorIdx = stableColorIndex(piRows.map(function (m) { return m.key }))
@@ -140,11 +194,13 @@ export function renderModels(data: any, st: UiState, cmp: Record<string, number>
 
   const html: string[] = []
   html.push('<section class="kpis">')
+  const piPriced = s.rows.filter(function (r: any) { return r.price && r.price.source !== 'missing' }).length
+  const extPriced = extRows.filter(function (e) { return e.priced }).length
   const mHero = [
     { label: rangeLabel + '模型数', value: String(stackRows.length || 0), sub: '有范围内用量的模型' },
     { label: rangeLabel + '模型费用', value: money(costItems.reduce(function (t: number, x: any) { return t + x.value }, 0)), sub: '按各模型均价摊算' },
     { label: '全量 Token', value: fmt(s.totalTokens), sub: '含缓存读写' },
-    { label: '已匹配价格', value: s.rows.filter(function (r: any) { return r.price.source !== 'missing' }).length + '/' + s.rows.length, sub: '手动 > 自定义 > 口径' }
+    { label: 'pi 侧已匹配单价', value: piPriced + '/' + s.rows.length, sub: '外部工具 ' + extPriced + '/' + extRows.length + ' · 手动 > 自定义 > 口径' }
   ]
   html.push(mHero.map(function (k) {
     return '<div class="kpi"><div class="kpi-l">' + esc(k.label) +
@@ -159,7 +215,20 @@ export function renderModels(data: any, st: UiState, cmp: Record<string, number>
     html.push(stackBar(stackRows, { labelW: 170 }))
     html.push(legend(CATS.map(function (c) { return { label: c.label, color: c.color } })))
   } else {
-    html.push('<div class="empty">当前范围内没有模型用量 —— 换更大时间范围试试。</div>')
+    // 与会话/项目页走同一套空态：区分「仓库从来没有模型用量」与「最近一条落在窗口外」。
+    // 旧文案一律写「换更大时间范围试试」，于是仓库里根本没数据时也在被指去改范围。
+    const allModelDays: string[] = (data.dayModel || [])
+      .map(function (dm: any) { return String(dm.d || '') })
+      .filter(Boolean)
+    for (const t of data?.external?.tools || []) {
+      for (const d of t.days || []) if (d && d.d) allModelDays.push(String(d.d))
+    }
+    allModelDays.sort()
+    const allModels = piRows.filter(function (m: MRow) { return m.total > 0 }).length
+    html.push(emptyStateHtml({
+      tab: 'models', rangeLabel, what: '模型用量',
+      allCount: allModels, lastDay: allModelDays.pop() || null
+    }))
   }
   html.push('</section>')
 
@@ -229,7 +298,7 @@ export function renderModels(data: any, st: UiState, cmp: Record<string, number>
   })
   html.push('</tbody></table></div>')
   if (s.unpriced.length) {
-    html.push('<div class="warn-box">⚠️ 有 ' + s.unpriced.length + ' 个模型没有匹配到价格，涉及 ' +
+    html.push('<div class="warn-box">注意：有 ' + s.unpriced.length + ' 个模型没有匹配到价格，涉及 ' +
       fmt(s.unpricedTokens) + ' token：' +
       s.unpriced.map(function (r: any) { return '<code>' + esc(r.m.key) + '</code>' }).join('、') +
       '。请在上表对应行填入单价。</div>')

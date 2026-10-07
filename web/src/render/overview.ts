@@ -1,5 +1,5 @@
 import {
-  fmt, money, pct, esc, CATS, POLICIES, SOURCES,
+  fmt, money, pct, CATS, POLICIES, SOURCES,
   normalizeCost, costOfTokens, computeAll, compareSources,
   dailyCost, externalSummary, rangeStats, rangeExt, rangeAnchor, withMergedDays, mergeDailyCost,
   filterHoursByRange, hourMatrix, rangeInsights, RANGES,
@@ -7,8 +7,8 @@ import {
   type PricingOpts, type PriceSource, type RangeKey
 } from '../pricing'
 import { MODEL_COLORS, stackBar, donut, legend, dayChart, heatmap, trimNum } from '../charts'
-import { loadQuotas, computeQuotas, quotaPct, type QuotaUsage } from '../quota'
-import { th, sourceTag, stableColorIndex, sesRecency, pad2, localDay, type UiState } from './shared'
+import { computeQuotas, quotaPct, type QuotaUsage } from '../quota'
+import { th, sourceTag, stableColorIndex, sesRecency, pad2, localDay, esc, type UiState } from './shared'
 
 export function renderOverview(data: any, st: UiState, cmp: Record<string, number>, range: RangeKey): string {
   if (!data) {
@@ -17,16 +17,25 @@ export function renderOverview(data: any, st: UiState, cmp: Record<string, numbe
   const s = computeAll(data, st)
   const ext = externalSummary(data, st.policy)
   const merged = withMergedDays(data)
-  const costByDay = mergeDailyCost(dailyCost(data, s), ext, data)
+  // pi 侧逐日费用（只喂 data.dayModel，即纯 pi）；合并后才是「全工具」。
+  // 两个口径必须分开取：rs.cost 已经是全工具合计，再叠一次外部费用就是同一笔钱加自己。
+  const piCostByDay = dailyCost(data, s)
+  const costByDay = mergeDailyCost(piCostByDay, ext, data)
   const rs = rangeStats(merged, s, costByDay, range)
+  const piRs = rangeStats(data, s, piCostByDay, range)
   const re = rangeExt(ext, range, rangeAnchor(data))
   const html: string[] = []
   const rangeLabel = (RANGES[range] || RANGES.all).label
   const anchor = rangeAnchor(data)
 
   /* hero */
+  // 合计一格就够；pi / 外部两个绝对值放 sub，不做百分比占比 —— 合并序列里没有
+  // 「pi 占多少」这个可成立的测量（rs.cost 已含外部，再除一次必然自指）。
+  const splitSub = ext
+    ? 'pi ' + money(piRs.cost) + ' + 外部 ' + money(re.totalCost)
+    : 'models.dev 单价 · 摊算'
   const hero: Array<{ label: string; value: string; sub: string }> = [
-    { label: rangeLabel + '费用', value: money(rs.cost), sub: 'models.dev 单价 · 摊算' },
+    { label: rangeLabel + '费用', value: money(rs.cost), sub: splitSub },
     { label: rangeLabel + 'Token', value: fmt(rs.tokens), sub: '精确求和 · 含缓存读写' },
     { label: '日均费用', value: money(rs.avgCost), sub: '按 ' + rs.dayCount + ' 个活跃日' },
     { label: '单日最高', value: money(rs.maxCost), sub: rs.maxDay || '—' },
@@ -36,16 +45,12 @@ export function renderOverview(data: any, st: UiState, cmp: Record<string, numbe
   // streak / week-top: pi day series only — use that series last day
   const piLast = ((data.days || []) as any[]).map((d: any) => d.d).filter(Boolean).sort().pop() || anchor
   const stk = calcStreak(data.days || [], piLast)
-  hero.push({
-    label: '连续活跃', value: stk.streak > 0 ? stk.streak + ' 天' : '—',
-    sub: stk.endDate ? '至 ' + stk.endDate : '断档或暂无数据'
-  })
-  if (ext) {
-    hero.push({
-      label: rangeLabel + '全部工具', value: money(rs.cost + re.totalCost),
-      sub: 'pi 占 ' + pct(rs.cost / ((rs.cost + re.totalCost) || 1) * 100)
-    })
-  }
+  /* 「连续活跃」不再占一格 KPI。7 个格子在 1196px 的内容宽下按 180px 基准只排得下 6 个，
+   * 落单那格会被 flex-grow 拉成整行宽的巨型空块。降级成走势行左侧的状态注记，
+   * 顺手给原来只挂在 title 上的 sparkline 补一句文字标签（见 ui.css 的 .spark-row）。 */
+  const streakCell = '<div class="kpi kpi-note"><div class="kpi-l">连续活跃</div>' +
+    '<div class="kpi-v">' + (stk.streak > 0 ? stk.streak + ' 天' : '—') + '</div>' +
+    '<div class="kpi-s">' + (stk.endDate ? '至 ' + esc(stk.endDate) : '断档或暂无数据') + '</div></div>'
   /* 1px 迷你 sparkline(ns-003):范围内逐日 token 归一走势 */
   const heroSpark = (function () {
     if (rs.days.length < 2) return ''
@@ -55,65 +60,36 @@ export function renderOverview(data: any, st: UiState, cmp: Record<string, numbe
       return (i / (rs.days.length - 1) * spW).toFixed(1) + ',' +
         (spH - 3 - (d.total / spMax) * (spH - 6)).toFixed(1)
     }).join(' ')
-    return '<div class="spark-row" title="' + esc(rangeLabel + '逐日 token 迷你走势') + '">' +
+    return '<span class="spark-cap">逐日 token</span>' +
+      '<div class="spark-wrap" title="' + esc(rangeLabel + '逐日 token 迷你走势') + '">' +
       '<svg class="spark" viewBox="0 0 ' + spW + ' ' + spH + '" preserveAspectRatio="none" aria-hidden="true">' +
       '<polyline points="' + spPts + '"/></svg></div>'
   })()
   html.push('<section class="kpis">' + hero.map(function (k) {
     return '<div class="kpi"><div class="kpi-l">' + esc(k.label) +
       '</div><div class="kpi-v">' + esc(k.value) + '</div><div class="kpi-s">' + esc(k.sub) + '</div></div>'
-  }).join('') + heroSpark + '</section>')
+  }).join('') + '<div class="spark-row">' + streakCell + heroSpark + '</div></section>')
 
-  /* 限额 · 已用 */
+  /* 限额 · 已用：一行摘要。
+     旧稿是一整块卡片 + 三条恒为 0 宽的进度条：额度在本应用里根本设不了
+     （limitTokens 恒 0 → pct 为 null → width:0%），于是界面出现「编码成 0% 的空条」
+     配着一笔真实金额。现在没额度就明说没额度，不画条。 */
   {
-    const quotas = computeQuotas(data, loadQuotas())
+    const quotas = computeQuotas(data, st.quotas, st.policy)
     const visible = quotas.filter(function (q: QuotaUsage) { return quotaPct(q) !== null || q.tokens > 0 })
     if (visible.length) {
-      html.push('<section class="card"><h2>限额 · 已用 <span class="hint">套餐窗口内用量 / 额度</span></h2>')
-      visible.forEach(function (q: QuotaUsage) {
+      html.push('<div class="note quota-note"><b>限额</b>：' + visible.map(function (q: QuotaUsage) {
         const p = quotaPct(q)
-        html.push('<div class="quota-row"><div class="q-label">' + esc(q.plan.label) +
-          '<span class="q-win">' + esc(q.plan.window) + '</span></div>' +
-          '<div class="q-bar"><b style="width:' + (p === null ? 0 : Math.min(100, p)).toFixed(1) + '%"></b></div>' +
-          '<div class="q-pct">' + (p === null ? '—' : Math.round(p) + '%') + '</div>' +
-          '<div class="q-val">' + fmt(q.tokens) + ' tok · ' + money(q.cost) + '</div></div>')
-      })
-      html.push('</section>')
-    }
-  }
-
-  /* 任务类别：由 AI 分类（设置里开关），不再用启发式词表 */
-  if (st.aiCategorize) {
-    const cats = (data as any).taskCategories
-    if (Array.isArray(cats) && cats.length) {
-      html.push('<section class="card"><h2>任务类别 <span class="hint">AI 分类 · 会消耗模型额度</span></h2>')
-      html.push('<div class="stack">')
-      const max = Math.max.apply(null, cats.map(function (c: any) { return c.tokens || c.count || 1 })) || 1
-      cats.forEach(function (c: any) {
-        const v = c.tokens || c.count || 0
-        html.push('<div class="srow"><div class="lbl">' + esc(c.label) + '</div>' +
-          '<div class="bar"><span style="width:' + (v / max * 100).toFixed(1) + '%;background:var(--qing)"></span></div>' +
-          '<div class="val">' + fmt(c.tokens || 0) + '</div><div class="pct">' + (c.count || 0) + ' 项</div></div>')
-      })
-      html.push('</div></section>')
-    }
-  }
-
-  /* 产出 · git（Yield） */
-  {
-    const ys = (data as any).yield
-    if (Array.isArray(ys) && ys.length) {
-      html.push('<section class="card"><h2>产出 · git <span class="hint">本地仓库 commit · 对照用量日</span></h2>')
-      html.push('<div class="tbl-wrap"><table class="tbl"><thead><tr><th>项目</th><th>提交</th><th>最近提交</th></tr></thead><tbody>')
-      ys.slice().sort(function (a: any, b: any) { return (b.total || 0) - (a.total || 0) }).forEach(function (y: any) {
-        const days = (y.days || []).slice().sort(function (a: any, b: any) { return a.d < b.d ? 1 : -1 })
-        const last = days[0]
-        html.push('<tr><td class="mname"><b>' + esc(y.project) + '</b><div class="raw">' + esc(y.root || '') + '</div></td>' +
-          '<td class="num strong">' + fmt(y.total || 0) + '</td>' +
-          '<td class="num">' + esc(last ? (last.d + (last.subjects && last.subjects[0] ? ' · ' + last.subjects[0] : '')) : '—') + '</td></tr>')
-      })
-      html.push('</tbody></table></div>')
-      html.push('</section>')
+        const limit = q.plan.limitTokens > 0 ? fmt(q.plan.limitTokens) + ' tok'
+          : q.plan.limitUsd > 0 ? money(q.plan.limitUsd) : ''
+        return '<span class="qsum"><b class="q-label">' + esc(q.plan.label) +
+          '<i class="q-win">' + esc(q.plan.window) + '</i></b>' +
+          (p === null
+            ? '<span class="q-none">额度上限未设置</span>'
+            : '<span class="q-pct">' + Math.round(p) + '%</span>') +
+          '<span class="q-val">' + fmt(q.tokens) + ' tok · ' + money(q.cost) +
+          (limit ? ' / 上限 ' + limit : '') + '</span></span>'
+      }).join('') + ' · 额度在<a href="#/settings?range=all">设置页</a>填</div>')
     }
   }
 

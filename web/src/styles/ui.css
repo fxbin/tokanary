@@ -12,8 +12,12 @@
 .kpi-l { font-size: 11px; font-weight: 600; color: var(--dim); white-space: nowrap; }
 .kpi-v { font-size: 17px; font-weight: 700; letter-spacing: -.3px; font-variant-numeric: tabular-nums; font-family: ui-monospace, Consolas, "Cascadia Mono", monospace; white-space: nowrap; }
 .kpi-s { flex-basis: 100%; font-size: 10.5px; color: var(--dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-/* 1px 迷你 sparkline(挂在 KPI 条尾,占满整行) */
-.spark-row { flex-basis: 100%; padding: 7px 12px; border-top: 1px solid var(--line); }
+/* 走势行：左侧「连续活跃」状态注记 + 右侧迷你 sparkline，共占 KPI 条的第二行。
+   旧稿是第 7 个 KPI 格子单独换行，flex-grow 把它拉成整行宽的巨型空块。 */
+.spark-row { flex-basis: 100%; display: flex; align-items: center; gap: 14px; padding: 6px 0; border-top: 1px solid var(--line); }
+.kpi.kpi-note { flex: 0 0 auto; align-self: stretch; align-content: center; padding: 0 14px; border-left: 0; border-right: 1px solid var(--line); }
+.spark-cap { flex: 0 0 auto; font-size: 11px; color: var(--dim); white-space: nowrap; }
+.spark-wrap { flex: 1 1 auto; min-width: 0; padding-right: 14px; }
 .spark { display: block; width: 100%; height: 26px; }
 .spark polyline { fill: none; stroke: var(--accent-2); stroke-width: 1; vector-effect: non-scaling-stroke; }
 
@@ -47,7 +51,6 @@
 .lg b { color: var(--fg); font-weight: 600; }
 
 .cost-row { display: grid; grid-template-columns: 240px 1fr; gap: 24px; align-items: center; }
-@media (max-width: 760px) { .cost-row { grid-template-columns: 1fr; } }
 .cost-list { display: flex; flex-direction: column; gap: 7px; }
 .cost-li { display: grid; grid-template-columns: 12px minmax(90px, 1.1fr) 2fr 76px 48px 74px; gap: 9px; align-items: center; font-size: 12.5px; }
 .cost-li i { width: 10px; height: 10px; border-radius: 3px; }
@@ -58,7 +61,19 @@
 .cl-pct, .cl-unit { text-align: right; color: var(--dim); font-variant-numeric: tabular-nums; font-size: 11.5px; }
 
 /* 表格 */
-.tbl-wrap { overflow-x: auto; margin: 0 -4px; }
+/* 横滚提示：右侧还有内容时右缘显影、左缘同理；滚到头自动消失。
+   background-attachment local/scroll 的经典两段阴影法 —— 无需 JS 监听 scroll。 */
+.tbl-wrap {
+  overflow-x: auto; margin: 0 -4px;
+  background:
+    linear-gradient(to right, var(--card) 30%, transparent) left center,
+    linear-gradient(to left, var(--card) 30%, transparent) right center,
+    radial-gradient(farthest-side at 0 50%, var(--scroll-hint), transparent) left center,
+    radial-gradient(farthest-side at 100% 50%, var(--scroll-hint), transparent) right center;
+  background-repeat: no-repeat;
+  background-size: 32px 100%, 32px 100%, 12px 100%, 12px 100%;
+  background-attachment: local, local, scroll, scroll;
+}
 table.tbl { width: 100%; border-collapse: collapse; font-size: 12.5px; }
 .tbl th, .tbl td { padding: 7px 9px; border-bottom: 1px solid var(--line); text-align: left; white-space: nowrap; }
 .tbl th { font-size: 11.5px; font-weight: 600; color: var(--dim); position: sticky; top: 0; background: var(--card); z-index: 1; }
@@ -81,16 +96,11 @@ table.tbl { width: 100%; border-collapse: collapse; font-size: 12.5px; }
 
 .tag { display: inline-block; padding: 1px 6px; border-radius: 999px; font-size: 10.5px; font-weight: 600; border: 1px solid transparent; }
 .tag-ok { background: color-mix(in srgb, var(--ok) 14%, transparent); color: var(--ok); border-color: color-mix(in srgb, var(--ok) 30%, transparent); }
-.tag-gw { background: color-mix(in srgb, #0ea5e9 15%, transparent); color: #0284c7; border-color: color-mix(in srgb, #0ea5e9 34%, transparent); }
+.tag-gw { background: color-mix(in srgb, var(--c-cost) 15%, transparent); color: var(--c-cost); border-color: color-mix(in srgb, var(--c-cost) 34%, transparent); }
 .tag-use { background: var(--accent-a14); color: var(--accent-ink); border-color: var(--accent-a30); }
 .tag-est { background: color-mix(in srgb, var(--warn) 16%, transparent); color: var(--warn); border-color: color-mix(in srgb, var(--warn) 32%, transparent); }
 .tag-miss { background: color-mix(in srgb, var(--err) 14%, transparent); color: var(--err); border-color: color-mix(in srgb, var(--err) 32%, transparent); }
 .tag-manual { background: var(--accent-a14); color: var(--accent-ink); border-color: var(--accent-a30); }
-
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) .tag-gw { color: #7dd3fc; }
-}
-:root[data-theme="dark"] .tag-gw { color: #7dd3fc; }
 
 .gw-bar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-bottom: 12px; }
 .gw-bar input[type=search] {
@@ -105,13 +115,6 @@ table.tbl { width: 100%; border-collapse: collapse; font-size: 12.5px; }
 .radio { display: inline-flex; align-items: center; gap: 6px; margin-right: 16px; cursor: pointer; }
 .radio input { accent-color: var(--accent); }
 .radio b { font-variant-numeric: tabular-nums; }
-
-/* 自定义价格源输入框 */
-#custom-url {
-  font: inherit; font-size: 12.5px; padding: 6px 10px; border-radius: 8px;
-  border: 1px solid var(--line); background: var(--wash-1); color: var(--fg);
-}
-#custom-url:focus { outline: 2px solid var(--accent-a40); border-color: var(--accent); }
 
 /* 跨工具卡片 */
 .tool-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 12px; margin-top: 16px; }
@@ -186,10 +189,6 @@ footer.foot { max-width: 1360px; margin: 8px auto 0; color: var(--dim); font-siz
 .week-tok { color: var(--dim); }
 .week-cost { font-weight: 600; }
 .week-pct { color: var(--dim); font-size: 11.5px; }
-@media (max-width: 640px) {
-  .week-row { grid-template-columns: 12px minmax(80px, 1.4fr) 1fr 64px 72px; font-size: 12px; }
-  .week-pct { display: none; }
-}
 
 /* U2: heatmap */
 .heatmap rect { transition: opacity .15s; }
@@ -233,14 +232,8 @@ footer.foot { max-width: 1360px; margin: 8px auto 0; color: var(--dim); font-siz
 }
 #budget-usd:focus { outline: 2px solid var(--accent-a40); border-color: var(--accent); }
 
-/* U5: iOS HIG — 窄屏 44px 触控目标 */
-@media (max-width: 640px) {
-  .tabs a, .seg button, #btn-theme { min-height: 44px; }
-  .tabs a { padding: 10px 16px; }
-  .seg button { padding: 10px 16px; }
-  .proj-row { min-height: 44px; }
-  .drill-back { min-height: 44px; padding: 10px 16px; }
-}
+/* 触控目标：桌面窗口 MinWidth 900，44px 触控档（iOS HIG）在本应用永不触发，
+   且会把账本密度拉散；指针驱动的桌面端保留 36px 档即可，故此处不再设断点。 */
 
 /* U5: Increase Contrast — 加粗边框、去半透明底 */
 @media (prefers-contrast: more) {
@@ -270,21 +263,78 @@ footer.foot { max-width: 1360px; margin: 8px auto 0; color: var(--dim); font-siz
   .fresh-warn { background: color-mix(in srgb, var(--warn) 24%, var(--card)); }
   .fresh-err { background: color-mix(in srgb, var(--err) 22%, var(--card)); }
   .tag-ok, .tag-use, .tag-manual { background: color-mix(in srgb, var(--accent) 18%, var(--card)); }
-  .tag-gw { background: color-mix(in srgb, #0ea5e9 22%, var(--card)); }
+  .tag-gw { background: color-mix(in srgb, var(--c-cost) 22%, var(--card)); }
   .tag-est { background: color-mix(in srgb, var(--warn) 22%, var(--card)); }
   .tag-miss { background: color-mix(in srgb, var(--err) 20%, var(--card)); }
   .proj-row, .ins, .tool-card { background: var(--wash-2); }
 }
 
-/* 限额条 */
-.quota-row{display:grid;grid-template-columns:110px 1fr 48px 160px;gap:10px;align-items:center;padding:8px 0;border-bottom:1px solid var(--line)}
-.quota-row:last-child{border-bottom:0}
-.q-label{font-weight:600;font-size:13px}
-.q-win{margin-left:8px;font-size:11px;color:var(--dim);font-weight:400}
-.q-bar{height:10px;background:var(--sunken);border-radius:5px;overflow:hidden;border:1px solid var(--line)}
-.q-bar b{display:block;height:100%;background:var(--qing);border-radius:5px}
-.q-pct{text-align:right;font-variant-numeric:tabular-nums;font-weight:600;color:var(--accent-ink)}
-.q-val{text-align:right;font-family:Menlo,monospace;font-size:11px;color:var(--dim);font-variant-numeric:tabular-nums}
+/* 限额：一行摘要（总览）。旧稿是一整块卡片 + 三条恒 0 宽的进度条，
+   额度设不了却配着大额金额 —— 现在没额度就写「未设上限」，不画条。
+   显著性：有信息的百分比与金额都比「未设上限」这句提示更重。 */
+.quota-note { line-height: 2.1; }
+.quota-note .qsum { display: inline-flex; align-items: baseline; gap: 6px; margin: 0 14px 0 4px; }
+.quota-note .qsum + .qsum { border-left: 1px solid var(--line); padding-left: 14px; }
+.quota-note .q-label { font-weight: 600; font-size: 12.5px; }
+.quota-note .q-win {
+  margin-left: 6px; font-style: normal; font-size: 10.5px;
+  color: var(--dim); font-weight: 400;
+}
+.quota-note .q-pct {
+  font-variant-numeric: tabular-nums; font-weight: 700; font-size: 13px;
+  color: var(--accent-ink);
+}
+.quota-note .q-val { font-variant-numeric: tabular-nums; font-size: 12.5px; color: var(--fg); font-weight: 600; }
+.quota-note .q-none { font-size: 11.5px; color: var(--dim); }
 
-.tips{margin:0;padding-left:18px;color:var(--t2)}
+/* 设置页的限额输入：与 #budget-usd 同规格 */
+.quota-input {
+  width: 128px; padding: 5px 8px; font: inherit; font-size: 13px;
+  color: var(--fg); background: var(--wash-2);
+  border: 1px solid var(--line); border-radius: 7px;
+  font-variant-numeric: tabular-nums;
+}
+.quota-input:focus { outline: 2px solid var(--accent-a40); border-color: var(--accent); }
+
+/* 限额行：说明文字在各自输入框正上方，一眼能分清哪个标签管哪个框。
+   旧稿把「token 上限」横排在两个框中间，读起来像第二个框的标签。 */
+.quota-row { gap: 18px; padding: 10px 0; border-top: 1px solid var(--line); }
+.quota-row:first-child { border-top: 0; padding-top: 2px; }
+.quota-name { min-width: 92px; font-weight: 600; color: var(--fg); }
+.quota-name i { font-style: normal; font-weight: 400; color: var(--dim); }
+.quota-name i::before { content: "（"; }
+.quota-name i::after { content: "）"; }
+.quota-cell { display: inline-flex; flex-direction: column; gap: 4px; cursor: pointer; }
+.quota-cell > span { font-size: 11.5px; color: var(--dim); letter-spacing: .02em; }
+
+/* 产出 · git：0 提交的仓库折进 details，不在首层铺开 */
+.yield-zero { margin-top: 12px; font-size: 12.5px; }
+.yield-zero summary { cursor: pointer; color: var(--dim); font-size: 11.5px; }
+.yield-zero summary:hover { color: var(--fg); }
+.yield-zero .dim { margin-top: 8px; line-height: 1.8; }
+
+.tips{margin:0;padding-left:18px;color:var(--dim)}
 .tips li{margin:6px 0;font-size:13px;line-height:1.55}
+
+/* 断点：按 Wails 窗口实际区间取（desktop.go Width 1440 / MinWidth 900）。
+   旧稿里的 760/640px 档在 MinWidth 900 下永不触发，已删；触控目标同理（见上方注释）。
+   窄档一律「收窄 + 换行」，不靠隐藏列——账本丢列等于丢数据。 */
+@media (max-width: 1100px) {
+  /* 限额摘要：窄档换行，金额与 token 数永远留着 */
+  .quota-note .qsum { margin-right: 10px; }
+  .quota-note .qsum + .qsum { padding-left: 10px; }
+  /* 本周 Top：收固定列宽，百分比列保留 */
+  .week-row { grid-template-columns: 12px minmax(96px, 2fr) 3fr 64px 72px 48px; gap: 8px; font-size: 12px; }
+  /* 费用明细六列：收窄而非截断 */
+  .cost-li { grid-template-columns: 12px minmax(72px, 1.1fr) 2fr 66px 42px 62px; gap: 7px; font-size: 12px; }
+  /* 宽表：先挤内边距换列宽，仍放不下就交给 .tbl-wrap 横滚（有右侧渐隐提示） */
+  .tbl th, .tbl td { padding: 6px 7px; }
+  .tbl input[type=number] { width: 72px; }
+  .quota-input { width: 104px; }
+}
+@media (max-width: 900px) {
+  .cost-row { grid-template-columns: 188px 1fr; gap: 16px; }
+  .kpi { padding: 9px 11px; }
+  .ins-row { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
+  .tc-head { flex-wrap: wrap; }
+}

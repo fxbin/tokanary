@@ -78,7 +78,9 @@ export function mergeDailyUsage(data: any): any[] {
   return Object.keys(byDay).sort().map((k) => byDay[k])
 }
 
-/** 合并 pi 日费用与 external 日费用（external 按该工具综合均价摊到天）。 */
+/** 合并 pi 日费用与 external 日费用（external 按该工具综合均价摊到天）。
+ *  r.unit 来自 externalSummary:该工具全量费用 ÷ 全量 token × 1e6,是按真实
+ *  四段 token 构成加权的综合均价,不是四档单价的算术平均。 */
 export function mergeDailyCost(
   costByDay: Record<string, number>,
   extSummary: { rows: any[]; totalTokens?: number; totalCost?: number } | null,
@@ -183,7 +185,10 @@ export interface RangeExtRow {
   cost: number
 }
 
-/** 跨工具范围汇总:token 按各工具 days 精确求和,费用按该工具综合均价摊算。 */
+/** 跨工具范围汇总:token 按各工具 days 精确求和,费用按该工具综合均价摊算。
+ *  r.unit 与 pi 侧 rows[].unit 同为「按真实 token 构成加权」的 $/1M(见
+ *  mergeDailyCost 注释),不是四价算术平均 —— 缓存占大头的工具因此不会被高估。
+ *  日粒度没有 per-model 明细,故按全量构成摊到范围内,与 pi 侧 dailyCost 同法。 */
 export function rangeExt(
   extSummary: { rows: any[] } | null, range: RangeKey, anchor?: string | null
 ): { rows: RangeExtRow[]; totalTokens: number; totalCost: number } {

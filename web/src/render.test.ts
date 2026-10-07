@@ -1,15 +1,41 @@
-/* Slice3b 走查:整页构造器 8 区块存在性 + 总额一致 + 无泄漏 + 自定义 tag。
+/* 渲染层回归测试：整页构造器存在性 + 本轮修复的口径锁。
  * 用法: npx vitest run (web/ 目录下)。需要 .cache/dashboard.json（tokanary refresh 生成） */
 import { describe, it, expect } from 'vitest'
-import { computeAll, compareSources, money, defaultOpts } from './pricing'
-import { renderPage, defaultUiState, missingSections } from './render'
+import {
+  computeAll, compareSources, money, dailyCost, externalSummary,
+  rangeStats, rangeExt, rangeAnchor, withMergedDays, mergeDailyCost, RANGES,
+  type RangeKey
+} from './pricing'
+import {
+  renderPage, renderOverview, renderProjects, renderSessions, renderSettings, renderModels,
+  defaultUiState, missingSections, esc, type UiState
+} from './render'
 import { hasAnyPricing, loadDashboardFixture } from './testsupport'
+import { computeQuotas, loadQuotas, saveQuotas, type QuotaPlan } from './quota'
 
 const DATA = loadDashboardFixture()
 const suite = DATA ? describe : describe.skip
 
 const st = defaultUiState()
 const cmp = DATA ? compareSources(DATA, st) : {}
+
+/** 总览在当前夹具下常用的两条默认套餐（额度未设 = 0）。 */
+const PLANS: QuotaPlan[] = [
+  { id: 'codex', label: 'Codex', tool: 'codex', window: '7d', limitTokens: 0, limitUsd: 0 },
+  { id: 'zcode', label: 'ZCode', tool: 'zcode', window: '7d', limitTokens: 0, limitUsd: 0 }
+]
+
+function overview(range: RangeKey, ui?: Partial<UiState>): string {
+  const s = Object.assign(defaultUiState(), ui || {})
+  return renderOverview(DATA, s, cmp, range)
+}
+
+/** 项目视图钻取到某项目时的产出表（0 提交仓库折进 details，不在首层）。 */
+function projectsHtml(drill: string | null, ui?: Partial<UiState>): string {
+  const s = Object.assign(defaultUiState(), ui || {})
+  if (drill) s.drillProject = drill
+  return renderProjects(DATA, s, cmp, 'all')
+}
 
 suite('renderPage walkthrough', () => {
   it('8 区块 + 输入框 + 渠道下拉 + SVG 齐全', () => {
@@ -27,17 +53,10 @@ suite('renderPage walkthrough', () => {
     expect(html).not.toMatch(/NaN/)
   })
 
-  it('自定义源命中时标「自定义源」', () => {
+  it('非 models.dev 来源仍标出来(调用方传入自定义单价时不冒充 models.dev)', () => {
     const st2 = defaultUiState()
     st2.customPrices = { 'gpt-5.6-sol': { input: 1, output: 2, cache_read: 0.1, cache_write: 0.2 } }
     expect(renderPage(DATA, st2, cmp, '')).toContain('自定义源')
-  })
-
-  it('网关价目表列出全部模型', () => {
-    const html = renderPage(DATA, st, cmp, '')
-    const ids: string[] = ((DATA.gateway || {}).models || []).map((m: any) => m.id)
-    const shown = ids.filter((id) => html.indexOf('>' + id + '<') >= 0).length
-    expect(shown).toBe(ids.length)
   })
 
   it('缺 data 时给出生效提示而非抛错', () => {
@@ -57,10 +76,10 @@ suite('renderPage walkthrough', () => {
   })
 
   it('全新克隆(无任何价格表)仍渲染完整且 8 区块齐全', () => {
-    // This is what a fresh clone looks like: .cache/prices-raw.json and
-    // data/gateway-models.json are gitignored, so `tokanary prices` has not
-    // been run yet. Token totals must still be right and every section must
-    // still render - only the money collapses to zero.
+    // This is what a fresh clone looks like: .cache/prices-raw.json is
+    // gitignored, so `tokanary prices` has not been run yet. Token totals must
+    // still be right and every section must still render - only the money
+    // collapses to zero.
     const bare: any = JSON.parse(JSON.stringify(DATA))
     bare.pricing = {}
     bare.gateway = null
@@ -75,5 +94,343 @@ suite('renderPage walkthrough', () => {
     expect(html).not.toContain('>undefined<')
     expect(html).not.toMatch(/NaN/)
     expect(html).toContain('0')
+  })
+})
+
+/* ------------------------------------------------------------------ P0：费用口径 */
+
+suite('总览：同一笔钱不得加自己', () => {
+  it('不再出现与「{范围}费用」重复的「{范围}全部工具」KPI', () => {
+    for (const range of ['all', '30d', '7d'] as RangeKey[]) {
+      const html = overview(range)
+      expect(html).not.toContain('全部工具')
+      expect(html).not.toContain(RANGES[range].label + '全部工具')
+    }
+  })
+
+  it('不再出现「pi 占」这种百分比占比（合并序列下它恒自指，无法诚实成立）', () => {
+    for (const range of ['all', '30d', '7d'] as RangeKey[]) {
+      expect(overview(range)).not.toContain('pi 占')
+    }
+  })
+
+  it('pi + 外部 === 合计，且旧 bug 的翻倍值不上页', () => {
+    const s = computeAll(DATA, st)
+    const ext = externalSummary(DATA, st.policy)
+    const piByDay = dailyCost(DATA, s)
+    const merged = withMergedDays(DATA)
+    const anchor = rangeAnchor(DATA)
+    for (const range of ['all', '30d', '7d'] as RangeKey[]) {
+      // rs 吃的是 withMergedDays()（已合入外部工具），所以它已经是全工具合计；
+      // 旧稿在这之上再加一次 rangeExt().totalCost，就是同一笔钱加自己。
+      const rs = rangeStats(merged, s, mergeDailyCost(piByDay, ext, DATA), range)
+      const pi = rangeStats(DATA, s, piByDay, range).cost
+      const extCost = rangeExt(ext, range, anchor).totalCost
+      // 浮点求和顺序不同，容差 1e-6（实测最大残差 1.5e-11，即 0 分钱）。
+      expect(Math.abs(pi + extCost - rs.cost)).toBeLessThan(1e-6)
+      expect(overview(range)).not.toContain(money(rs.cost + extCost))
+    }
+  })
+
+  it('首格费用把 pi 与外部两个绝对值写进 sub', () => {
+    const s = computeAll(DATA, st)
+    const ext = externalSummary(DATA, st.policy)
+    const pi = rangeStats(DATA, s, dailyCost(DATA, s), 'all').cost
+    const extCost = rangeExt(ext, 'all', rangeAnchor(DATA)).totalCost
+    expect(overview('all')).toContain('pi ' + money(pi) + ' + 外部 ' + money(extCost))
+  })
+
+  it('没有外部数据时退回单一口径，不出 NaN / 空串', () => {
+    const bare: any = { ...DATA, external: null }
+    const html = renderOverview(bare, defaultUiState(), cmp, 'all')
+    expect(html).not.toMatch(/NaN/)
+    expect(html).not.toContain('外部 $')
+    expect(html).toContain('models.dev 单价')
+  })
+})
+
+/* ------------------------------------------------------------------ P2：读数条排版 */
+
+suite('总览：读数条不留空行', () => {
+  it('6 格 KPI + 走势行内的「连续活跃」注记，不产生落单巨型格', () => {
+    // 7 个 .kpi 在 1196px 内容宽下按 180px 基准只排得下 6 个，第 7 个会被 flex-grow
+    // 拉成整行宽的空块。回归锁：走势行之前只准有 6 个格，连续活跃必须落在 spark-row 里。
+    const html = overview('all')
+    const head = html.slice(0, html.indexOf('spark-row'))
+    expect((head.match(/class="kpi"/g) || []).length).toBe(6)
+    expect(html).toContain('class="kpi kpi-note"')
+    expect(html.indexOf('连续活跃')).toBeGreaterThan(html.indexOf('spark-row'))
+  })
+
+  it('sparkline 不再只有 tooltip，有一句文字标签', () => {
+    expect(overview('all')).toContain('逐日 token')
+  })
+})
+
+/* ------------------------------------------------------------------ P1：限额 */
+
+suite('总览：限额摘要', () => {
+  it('不再渲染 0% 空进度条（额度未设时也不画条）', () => {
+    const html = overview('all', { quotas: PLANS })
+    expect(html).not.toContain('q-bar')
+    expect(html).not.toMatch(/width:0(\.0)?%/)
+  })
+
+  it('额度未设 → 明说未设上限', () => {
+    const html = overview('all', { quotas: PLANS })
+    expect(html).toContain('额度上限未设置')
+    expect(html).not.toMatch(/<span class="q-none">—/)
+  })
+
+  it('额度已设 → 给真实百分比与已用量', () => {
+    const plans = PLANS.map((p) => ({ ...p, limitTokens: 2_000_000_000 }))
+    const html = overview('all', { quotas: plans })
+    expect(html).not.toContain('额度上限未设置')
+    expect(html).toMatch(/>\d+%</)
+    expect(html).toContain('上限')
+  })
+})
+
+/* ------------------------------------------------------------------ P1：设置页 */
+
+suite('设置页：单价只有 models.dev', () => {
+  it('不再渲染自定义价格源与网关价目表', () => {
+    const html = renderSettings(DATA, st, cmp, 'all', '')
+    expect(html).not.toContain('custom-url')
+    expect(html).not.toContain('自定义价格源')
+    expect(html).not.toContain('网关价目表')
+    expect(html).not.toContain('自有网关')
+    expect(html).toContain('models.dev')
+  })
+
+  it('不再出现「切换后全页金额重算」这类兑现不了的说明', () => {
+    expect(renderSettings(DATA, st, cmp, 'all', '')).not.toContain('切换后全页金额重算')
+  })
+
+  it('「单价来源」与「价格来源」合并成一行，信息一条不少', () => {
+    // 单价只有一个源，两个标签说的是同一件事。合并后金额、抓取时间、匹配情况
+    // 都必须还在同一格里，少一条就等于用整洁换掉了信息。
+    const html = renderSettings(DATA, st, cmp, 'all', '')
+    expect(html).toContain('单价来源')
+    expect(html).not.toContain('价格来源：')
+    expect(html).toContain('抓取于')
+    expect(html).toMatch(/个模型里 \d+ 个已匹配单价/)
+  })
+
+  it('保留手动改价的导入/导出入口', () => {
+    const html = renderSettings(DATA, st, cmp, 'all', '')
+    expect(html).toContain('id="btn-export"')
+    expect(html).toContain('id="btn-import"')
+    expect(html).toContain('id="io"')
+    expect(html).toContain('手动改价')
+  })
+
+  it('限额区块给出可填的额度输入', () => {
+    const html = renderSettings(DATA, { ...defaultUiState(), quotas: PLANS }, cmp, 'all', '')
+    expect(html).toContain('id="quota-tok-codex"')
+    expect(html).toContain('id="quota-usd-codex"')
+  })
+})
+
+/* ------------------------------------------------------------------ P1：产出 git */
+
+suite('产出 · git：已从总览下沉到项目视图', () => {
+  it('总览不再渲染 git 提交表', () => {
+    expect(overview('all')).not.toContain('产出 · git')
+  })
+
+  it('项目视图有产出表，未归因的显式标出、不按 0 冒充', () => {
+    const html = projectsHtml(null)
+    expect(html).toContain('产出 · git')
+    expect(html).toContain('未归因')
+    expect(html).not.toMatch(/NaN/)
+  })
+
+  it('同名钻取时才摊「每次提交成本」，数值 = 项目费用 ÷ 提交数', () => {
+    const s = computeAll(DATA, st)
+    const unitByKey: Record<string, number> = {}
+    s.rows.forEach((r: any) => { unitByKey[r.m.key] = r.unit })
+    const allSess: any[] = (DATA.sessionsAll && DATA.sessionsAll.length) ? DATA.sessionsAll : (DATA.sessions || [])
+    const matched = (DATA.projects || [])
+      .map((p: any) => p.name as string)
+      .find((n: string) => (DATA.yield || []).some((y: any) => y.project === n && y.total > 0))
+    expect(matched, '夹具里应至少有一个仓库名与项目名同名的可归因项目').toBeTruthy()
+    const pCost = allSess
+      .filter((x) => (x.project || '(无项目)') === matched)
+      .reduce((t, x) => t + (unitByKey[x.model] || 0) * (x.total || 0) / 1e6, 0)
+    const commits = (DATA.yield || [])
+      .filter((y: any) => y.project === matched)
+      .reduce((t: number, y: any) => t + (y.total || 0), 0)
+    const html = projectsHtml(matched)
+    expect(html).toContain('该项目产出 · git')
+    expect(html).not.toContain('无提交，无法摊算')
+    expect(html).toContain(money(pCost / commits))
+  })
+
+  it('0 提交的仓库不进首层表，折进 details', () => {
+    const zeros = (DATA.yield || []).filter((y: any) => !(y.total > 0)).length
+    if (!zeros) return // 夹具里没有 0 提交的仓库，本例不适用
+    const html = projectsHtml(null)
+    expect(html).toContain('<details class="yield-zero">')
+    expect(html).toContain('没有提交')
+  })
+})
+
+/* ------------------------------------------------------------------ P1：脏字节 */
+
+suite('esc():坏字节不外泄', () => {
+  it('U+FFFD 替换字符先清掉再转义', () => {
+    expect(esc('核对�…')).toBe('核对…')
+    expect(esc('a�<b>')).toBe('a&lt;b&gt;')
+    expect(esc(null)).toBe('')
+  })
+
+  it('提交 subject 里的坏字节不会出现在项目页 HTML 里', () => {
+    expect(projectsHtml(null)).not.toContain('�')
+  })
+})
+
+/* ------------------------------------------------------------------ P1：空态 */
+
+suite('空态：区分「从来没有数据」与「落在窗口外」', () => {
+  function sessionsHtml(range: RangeKey, data: any): string {
+    return renderSessions(data, defaultUiState(), compareSources(data, defaultUiState()), range)
+  }
+
+  it('窗口内为 0 而全量有数据 → 说清在窗口外并给出「切到全部」', () => {
+    const html = sessionsHtml('7d', DATA)
+    if (!html.includes('class="empty"')) return // 该夹具窗口内本来就有会话，不适用
+    expect(html).toContain('落在窗口外')
+    expect(html).toContain('切到「全部」')
+  })
+
+  it('仓库里一条会话都没有 → 指向采集，而不是让用户改范围', () => {
+    const empty: any = { ...DATA, sessions: [], sessionsAll: [] }
+    const html = sessionsHtml('7d', empty)
+    expect(html).toContain('tokanary collect')
+    expect(html).toContain('也没有任何记录')
+  })
+
+  // 模型页曾单独写死一句「换更大时间范围试试」，于是「仓库没数据」也被指去改范围。
+  function modelsHtml(range: RangeKey, data: any): string {
+    const s = defaultUiState()
+    return renderModels(data, s, compareSources(data, s), range)
+  }
+
+  it('模型页同例：pi 侧日明细落后于锚点 → 说清落在窗口外', () => {
+    // 复刻真实现象：pi 侧 dayModel 最新 2026-09-20，锚点 2026-10-07，
+    // 近 7 天窗口里的模型 token 为 0 —— 那是「数据在窗口外」，不是没数据。
+    const lagged: any = JSON.parse(JSON.stringify(DATA))
+    lagged.external = null
+    lagged.dayModel = (DATA.dayModel || []).filter((dm: any) => dm.d <= '2026-09-20')
+    const html = modelsHtml('7d', lagged)
+    if (!html.includes('class="empty"')) return // 该夹具窗口内本来就有模型用量，不适用
+    expect(html).toContain('落在窗口外')
+    expect(html).toContain('切到「全部」')
+  })
+
+  it('模型页同例：一个模型都没有 → 指向采集', () => {
+    const empty: any = JSON.parse(JSON.stringify(DATA))
+    empty.external = null
+    empty.models = []; empty.days = []; empty.dayModel = []
+    expect(modelsHtml('7d', empty)).toContain('tokanary collect')
+  })
+})
+
+/* ------------------------------------------------------------------ 额度口径（quota.ts）
+
+   下面三条只用合成夹具，不依赖 .cache/dashboard.json —— 它们守的是这段代码本身。
+   背景：computeQuotas 的单价曾经退回「四档单价算术平均」，缓存读占大头的工具
+   （真实 Codex：33,876,829,458 缓存读、0 缓存写）费用直接差 8 倍，而整个套件
+   当时照样全绿。external.tools[] 从不带 unit 字段，所以那条 fallback 是唯一生效路径。 */
+
+describe('quota：限额费用按真实 token 构成加权', () => {
+  /** 本地今天（computeQuotas 以「今天为终点向前推」过滤 days，夹具必须落在窗口内）。 */
+  function todayKey(): string {
+    const d = new Date()
+    const pad = function (x: number) { return String(x).padStart(2, '0') }
+    return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate())
+  }
+
+  /** 合成一个外部工具：单模型 + 单日，day 落在今天，因此任何套餐窗口都收得到。 */
+  function extTool(tool: string, mix: { cacheRead: number; cacheWrite: number; input: number; output: number }, cost: any): any {
+    const total = mix.cacheRead + mix.cacheWrite + mix.input + mix.output
+    const m = { id: 'demo-model', total, cacheRead: mix.cacheRead, cacheWrite: mix.cacheWrite, input: mix.input, output: mix.output }
+    return {
+      tool, label: tool, total,
+      models: [Object.assign({}, m, { price: { cost } })],
+      days: [Object.assign({ d: todayKey() }, mix, { total })]
+    }
+  }
+
+  function dataOf(tool: any): any {
+    return { external: { tools: [tool], totals: { sessions: 1, calls: 1 } } }
+  }
+
+  const PLAN: QuotaPlan[] = [
+    { id: 'demo', label: 'Demo', tool: 'demo', window: '7d', limitTokens: 0, limitUsd: 0 }
+  ]
+
+  it('缓存读占 99% 的工具，费用必须远低于四价算术平均（锁加权均价，不锁字符串）', () => {
+    const total = 1_000_000_000
+    const mix = { cacheRead: 990_000_000, cacheWrite: 1_000_000, input: 5_000_000, output: 4_000_000 }
+    const price = { input: 10, output: 30, cache_read: 0.1, cache_write: 12.5 }
+    const q = computeQuotas(dataOf(extTool('demo', mix, price)), PLAN)[0]
+
+    // 真实加权费用 = 990e6×0.1 + 5e6×10 + 4e6×30 + 1e6×12.5，除以 1e6 = 281.5
+    expect(q.tokens).toBe(total)
+    expect(q.cost).toBeCloseTo(281.5, 6)
+    expect(q.cost).toBeGreaterThan(0)
+
+    // 旧口径：四档单价算术平均 (10+30+0.1+12.5)/4 = 13.15 $/M → 13,150
+    const arithUnit = (10 + 30 + 0.1 + 12.5) / 4
+    const arithCost = arithUnit * total / 1e6
+    expect(q.cost).toBeLessThan(arithCost * 0.05)
+    expect(arithCost / q.cost).toBeGreaterThan(40)
+  })
+
+  it('policy 参数真的进算式：缺 cache_write 单价时 ratio10 与 zero 差出那笔缓存写', () => {
+    const mix = { cacheRead: 0, cacheWrite: 200_000_000, input: 600_000_000, output: 200_000_000 }
+    // 故意不给 cache_write：normalizeCost 会按 policy 推算（ratio10 = input×1.25，zero = 0）
+    const price = { input: 10, output: 30, cache_read: 0.1 }
+    const data = dataOf(extTool('demo', mix, price))
+    const a = computeQuotas(data, PLAN, 'ratio10')[0]
+    const b = computeQuotas(data, PLAN, 'zero')[0]
+
+    // 缓存写 200e6 × (12.5 - 0) / 1e6 = 2,500
+    expect(a.cost).toBeCloseTo(14_500, 6)
+    expect(b.cost).toBeCloseTo(12_000, 6)
+    expect(a.cost - b.cost).toBeCloseTo(2_500, 6)
+    expect(a.cost).toBeGreaterThan(b.cost)
+    // 省略 policy 时必须落到 ratio10：默认值翻成 zero 也要被这条抓住
+    expect(computeQuotas(data, PLAN)[0].cost).toBeCloseTo(a.cost, 6)
+  })
+
+  it('loadQuotas / saveQuotas 往返相等（saveQuotas 这一轮第一次有了调用者）', () => {
+    // vitest 默认 node 环境没有 localStorage；没有这层替身两个函数都会静默吞掉异常，
+    // 往返测试会假绿。
+    const store: Record<string, string> = {}
+    const orig = (globalThis as any).localStorage
+    ;(globalThis as any).localStorage = {
+      getItem: function (k: string) { return Object.prototype.hasOwnProperty.call(store, k) ? store[k] : null },
+      setItem: function (k: string, v: string) { store[k] = String(v) },
+      removeItem: function (k: string) { delete store[k] },
+      clear: function () { for (const k of Object.keys(store)) delete store[k] },
+      key: function (i: number) { return Object.keys(store)[i] ?? null },
+      length: 0
+    }
+    try {
+      expect(loadQuotas()).toHaveLength(3) // 空仓库给 3 条默认套餐
+
+      const plans: QuotaPlan[] = [
+        { id: 'codex', label: 'Codex', tool: 'codex', window: '7d', limitTokens: 2_000_000_000, limitUsd: 50 },
+        { id: 'mimo', label: 'Xiaomi MiMo', tool: 'xiaomi-mimo', window: '30d', limitTokens: 0, limitUsd: 12.5 }
+      ]
+      saveQuotas(plans)
+      expect(loadQuotas()).toEqual(plans)
+    } finally {
+      if (orig === undefined) delete (globalThis as any).localStorage
+      else (globalThis as any).localStorage = orig
+    }
   })
 })

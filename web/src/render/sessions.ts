@@ -1,5 +1,5 @@
 import {
-  fmt, money, pct, esc, CATS, POLICIES, SOURCES,
+  fmt, money, pct, CATS, POLICIES, SOURCES,
   normalizeCost, costOfTokens, computeAll, compareSources,
   dailyCost, externalSummary, rangeStats, rangeExt, rangeAnchor,
   filterHoursByRange, hourMatrix, rangeInsights, RANGES,
@@ -7,7 +7,7 @@ import {
   type PricingOpts, type PriceSource, type RangeKey
 } from '../pricing'
 import { MODEL_COLORS, stackBar, donut, legend, dayChart, heatmap, trimNum } from '../charts'
-import { th, sourceTag, stableColorIndex, sesRecency, pad2, localDay, type UiState } from './shared'
+import { th, sourceTag, stableColorIndex, sesRecency, pad2, localDay, esc, emptyStateHtml, type UiState } from './shared'
 
 export function renderSessions(data: any, st: UiState, cmp: Record<string, number>, range: RangeKey): string {
   if (!data) {
@@ -106,8 +106,23 @@ export function renderSessions(data: any, st: UiState, cmp: Record<string, numbe
     '</div>')
 
   if (!rows.length) {
-    html.push('<div class="empty">' + (q ? '没有匹配「' + esc(q) + '」的会话 —— 换个关键词或扩大时间范围。'
-      : '当前范围内没有会话 —— 换更大时间范围试试。') + '</div>')
+    if (q) {
+      html.push('<div class="empty">没有匹配「' + esc(q) + '」的会话 —— 换个关键词或扩大时间范围。</div>')
+    } else {
+      // 「窗口内为 0」和「从来没有数据」必须分开说：pi 侧最新活动日常落后于外部工具
+      // （锚点取所有源最新日），手动切到近 7 天就会撞上「数据落在窗口外」。
+      const all = data.sessions || []
+      const lastDay = all.reduce(function (m: string, x: any) {
+        const ts = x.updatedAt || x.createdAt
+        if (!ts) return m
+        const d = localDay(ts)
+        return d > m ? d : m
+      }, '')
+      html.push(emptyStateHtml({
+        tab: 'sessions', rangeLabel, what: '会话',
+        allCount: all.length, lastDay: lastDay || null
+      }))
+    }
   } else {
     html.push('<div class="tbl-wrap"><table class="tbl"><thead><tr>' +
       '<th>#</th>' + sesTh('title', '标题') + '<th>项目</th><th>模型</th>' +

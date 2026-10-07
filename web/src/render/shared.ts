@@ -1,5 +1,5 @@
 import {
-  fmt, money, pct, esc, CATS, POLICIES, SOURCES,
+  fmt, money, pct, esc as escHtml, CATS, POLICIES, SOURCES,
   normalizeCost, costOfTokens, computeAll, compareSources,
   dailyCost, externalSummary, rangeStats, rangeExt, rangeAnchor,
   filterHoursByRange, hourMatrix, rangeInsights, RANGES,
@@ -7,31 +7,38 @@ import {
   type PricingOpts, type PriceSource, type RangeKey
 } from '../pricing'
 import { MODEL_COLORS, stackBar, donut, legend, dayChart, heatmap, trimNum } from '../charts'
+import type { QuotaPlan } from '../quota'
+
+/**
+ * esc():HTML 转义之前先洗掉 U+FFFD 替换字符。
+ * git commit subject 从仓库原样读出,遇到坏字节(常见于在多字节字符中间被截断的
+ * subject)终端渲染成 �,HTML 里就会把 U+FFFD 直接印到界面上。整条剔除,不留问号。
+ * 注意:pricing.ts 里那个 esc 不做这一步,渲染层一律用本文件导出的这个。
+ */
+export function esc(s: unknown): string {
+  const t = String(s === null || s === undefined ? '' : s)
+  return escHtml(t.indexOf('�') >= 0 ? t.replace(/�/g, '') : t)
+}
 
 export interface UiState extends PricingOpts {
-  customUrl: string
-  customFetchedAt: string | null
-  customError: string
   sortKey: string
   sortDir: number
-  gwQuery: string
-  gwSort: string
   sesQuery: string
   sesSortKey: string
   sesSortDir: number
   drillProject: string | null
   budgetUsd: number
-  aiCategorize: boolean
+  /** 套餐额度；由 App.vue 从 localStorage 读入，改动即写回（saveQuotas）。 */
+  quotas: QuotaPlan[]
 }
 
 export function defaultUiState(): UiState {
   return {
     policy: 'ratio10', priceSource: 'modelsdev', overrides: {}, customPrices: null,
-    customUrl: '', customFetchedAt: null, customError: '',
-    sortKey: 'total', sortDir: -1, gwQuery: '', gwSort: 'inuse',
+    sortKey: 'total', sortDir: -1,
     sesQuery: '', sesSortKey: 'updatedAt', sesSortDir: -1,
     drillProject: null, budgetUsd: 0,
-    aiCategorize: false
+    quotas: []
   }
 }
 
@@ -48,7 +55,9 @@ export function sourceTag(key: string, p: any, st: UiState): string {
   if (p.source === 'manual') {
     out.push('<span class="tag tag-manual">' + esc(ov.label || '手动填价') + '</span>')
   } else if (p.source === 'custom') {
-    out.push('<span class="tag tag-manual" title="来自「价格设置」里配置的自定义价格源 URL">自定义源</span>')
+    // 单价只走 models.dev(pricing.ts 保留该分支,本应用已不再加载自定义源):
+    // 标签仍按「非 models.dev」标出来,免得把未知来源当成 models.dev 报价。
+    out.push('<span class="tag tag-manual" title="来自调用方传入的自定义单价(本应用设置页已不再提供自定义价格源)">自定义源</span>')
   } else {
     out.push('<span class="tag tag-ok">models.dev</span>')
   }
@@ -109,6 +118,36 @@ export function pad2(x: number): string { return String(x).padStart(2, '0') }
 export function localDay(ts: number): string {
   const dt = new Date(ts)
   return dt.getFullYear() + '-' + pad2(dt.getMonth() + 1) + '-' + pad2(dt.getDate())
+}
+
+export interface EmptyState {
+  /** 当前 tab,用于「切到全部」的 hash 链接 */
+  tab: string
+  rangeLabel: string
+  /** 名词,如「会话」「项目」 */
+  what: string
+  /** 未做任何过滤时的条数:0 = 仓库里从来没有过 */
+  allCount: number
+  /** 未过滤时最新的一条落在哪一天 */
+  lastDay: string | null
+}
+
+/**
+ * 空态必须能区分两种成因:
+ *  - allCount === 0 → 真的从来没数据 → 让用户去采集;
+ *  - allCount  > 0 → 数据在窗口外(切到更小的范围就会出现) → 给「切到全部」的出口。
+ * 旧文案两种情况都写「换更大时间范围试试」,于是用户面对真没数据时也在被指去改范围。
+ */
+export function emptyStateHtml(e: EmptyState): string {
+  if (!e.allCount) {
+    // allCount 是「不做任何过滤」的条数：0 说明仓库里压根没有这类记录，
+    // 这时让用户去改时间范围是错的，该让他去采集。
+    return '<div class="empty"><b>当前范围没有' + esc(e.what) + '</b>：' +
+      '仓库里也没有任何记录 —— 先跑 <code>tokanary collect</code> 采集，再点右上角「重新读取」。</div>'
+  }
+  return '<div class="empty"><b>' + esc(e.rangeLabel) + '窗口内没有' + esc(e.what) + '</b>' +
+    '：全量共 ' + e.allCount + ' 条，最近一条在 ' + esc(e.lastDay || '未知日期') + '，落在窗口外。<br>' +
+    '<a href="#/' + esc(e.tab) + '?range=all">切到「全部」</a>看全量，或点右上角「重新读取」重新采集。</div>'
 }
 
 /** 预算告警条:0=关闭;返回空串或 HTML(≥50/80/95 分级)。cost 为比较口径费用(USD)。 */

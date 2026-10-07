@@ -1,5 +1,5 @@
 import {
-  fmt, money, pct, esc, CATS, POLICIES, SOURCES,
+  fmt, money, pct, CATS, POLICIES, SOURCES,
   normalizeCost, costOfTokens, computeAll, compareSources,
   dailyCost, externalSummary, rangeStats, rangeExt, rangeAnchor,
   filterHoursByRange, hourMatrix, rangeInsights, RANGES,
@@ -7,16 +7,52 @@ import {
   type PricingOpts, type PriceSource, type RangeKey
 } from '../pricing'
 import { MODEL_COLORS, stackBar, donut, legend, dayChart, heatmap, trimNum } from '../charts'
-import { th, sourceTag, stableColorIndex, sesRecency, pad2, localDay, type UiState } from './shared'
+import { th, sourceTag, stableColorIndex, sesRecency, pad2, localDay, esc, emptyStateHtml, type UiState } from './shared'
 
 export function budgetAlertHtml(cost: number, budgetUsd: number): string {
   if (!budgetUsd || budgetUsd <= 0) return ''
   const pctUsed = cost / budgetUsd * 100
   const level = pctUsed >= 95 ? 'err' : pctUsed >= 80 ? 'err' : pctUsed >= 50 ? 'warn' : 'ok'
-  const tag = level === 'err' ? '⚠️ 预算告警' : level === 'warn' ? '⚠️ 预算过半' : '预算进度'
+  const tag = level === 'err' ? '注意 · 预算告警' : level === 'warn' ? '注意 · 预算过半' : '预算进度'
   return '<div class="note budget-' + level + '"><b>' + tag + '</b>：已用 <b>' + money(cost) +
     '</b> / 预算 <b>' + money(budgetUsd) + '</b>（' + pct(pctUsed) + '）' +
     (level === 'ok' ? '。在设置页可调整月预算。' : '。请检查模型用量或提高预算。') + '</div>'
+}
+
+/**
+ * git 产出与用量归因。
+ *
+ * data.yield 的项目名来自 git root 扫描（仓库目录 basename），用量侧的
+ * sessions.project_id 是会话自己带的项目名 —— 两边没有 join key。所以：
+ *  - 同名对上 → 才给费用与「每次提交成本」；
+ *  - 对不上 → 标「未归因」，绝不显示 0 冒充。
+ */
+export interface YieldRow {
+  name: string
+  root: string
+  total: number
+  lastDay: string | null
+  lastSubject: string | null
+  /** 与之同名、且在当前项目视图里有费用的项目名；对不上为 null */
+  attributedTo: string | null
+}
+
+export function yieldRows(data: any, projectNames: Record<string, true>): YieldRow[] {
+  const ys = (data || {}).yield
+  if (!Array.isArray(ys)) return []
+  return ys.map(function (y: any) {
+    const days = (y.days || []).slice().sort(function (a: any, b: any) { return a.d < b.d ? 1 : -1 })
+    const last = days[0]
+    const name = String(y.project || '')
+    return {
+      name,
+      root: String(y.root || ''),
+      total: Number(y.total || 0),
+      lastDay: last ? String(last.d) : null,
+      lastSubject: last && last.subjects && last.subjects[0] ? String(last.subjects[0]) : null,
+      attributedTo: projectNames[name] ? name : null
+    }
+  })
 }
 
 /** Tab 项目:归因堆叠条 + 点击钻取(模型/会话/日趋势)。 */
@@ -102,6 +138,11 @@ export function renderProjects(data: any, st: UiState, cmp: Record<string, numbe
     projRows = Object.keys(map).map(function (k) { return map[k] })
   }
   projRows.sort(function (a, b) { return b.total - a.total })
+  const projNames: Record<string, true> = {}
+  projRows.forEach(function (p) { projNames[p.name] = true })
+  const allYield = yieldRows(data, projNames)
+  const withCommits = allYield.filter(function (y: YieldRow) { return y.total > 0 })
+  const noCommits = allYield.filter(function (y: YieldRow) { return y.total <= 0 })
 
   const html: string[] = []
   const sumTok = projRows.reduce(function (t: number, r: any) { return t + r.total }, 0)
@@ -128,7 +169,16 @@ export function renderProjects(data: any, st: UiState, cmp: Record<string, numbe
     (approx ? '范围内按会话 updatedAt 过滤 · token/费用为会话级近似 · ' : '') +
     '点击条目钻取该项目</span></h2>')
   if (!projRows.length) {
-    html.push('<div class="empty">当前范围内没有项目用量 —— 换更大时间范围试试。</div>')
+    const lastDay = allSess.reduce(function (m: string, x: any) {
+      const ts = x.updatedAt || x.createdAt
+      if (!ts) return m
+      const d = localDay(ts)
+      return d > m ? d : m
+    }, '')
+    html.push(emptyStateHtml({
+      tab: 'projects', rangeLabel, what: '项目用量',
+      allCount: allSess.length, lastDay: lastDay || null
+    }))
   } else {
     const bars = projRows.map(function (p) {
       return {
@@ -146,6 +196,44 @@ export function renderProjects(data: any, st: UiState, cmp: Record<string, numbe
     }).join('') + '</div>')
   }
   html.push('</section>')
+
+  /* 产出 · git 汇总：首层只给一行口径 + 仓库清单，有提交数的在前，
+     0 提交的折进 <details>，不占首层版面（旧稿在总览一次铺 29 行）。 */
+  if (allYield.length) {
+    const attributed = withCommits.filter(function (y: YieldRow) { return !!y.attributedTo })
+    const unattributed = withCommits.filter(function (y: YieldRow) { return !y.attributedTo })
+    const commitTotal = allYield.reduce(function (t: number, y: YieldRow) { return t + y.total }, 0)
+    html.push('<section class="card">')
+    html.push('<h2>产出 · git <span class="hint">本地仓库 commit · ' +
+      allYield.length + ' 个仓库共 ' + fmt(commitTotal) + ' 次提交</span></h2>')
+    html.push('<div class="note-inline dim small">归因规则：git 表的项目名来自仓库目录名（<code>y.root</code>），' +
+      '用量来自 <code>sessions.project_id</code>，两边没有 join key —— 只有<strong>同名</strong>才对得上费用。' +
+      '对不上的一律记「未归因」，不按 0 元计，也不摊「每次提交成本」。' +
+      '点上面任一项目进钻取，可看该项目对上的仓库与每次提交成本。</div>')
+    html.push('<div class="tbl-wrap"><table class="tbl"><thead><tr>' +
+      '<th>仓库</th><th class="num">提交</th><th>归因</th><th>最近提交</th>' +
+      '</tr></thead><tbody>')
+    withCommits.slice().sort(function (a: any, b: any) { return b.total - a.total }).forEach(function (y: YieldRow) {
+      html.push('<tr' + (y.attributedTo ? ' data-proj="' + esc(y.attributedTo) + '"' : '') + '>' +
+        '<td class="mname"><b>' + esc(y.name) + '</b><div class="raw">' + esc(y.root) + '</div></td>' +
+        '<td class="num strong">' + fmt(y.total) + '</td>' +
+        '<td>' + (y.attributedTo
+          ? '<span class="tag tag-ok">对上 ' + esc(y.attributedTo) + '</span>'
+          : '<span class="tag tag-miss">未归因</span><span class="dim small"> 无用量数据</span>') + '</td>' +
+        '<td class="num">' + esc((y.lastDay || '—') + (y.lastSubject ? ' · ' + y.lastSubject : '')) + '</td></tr>')
+    })
+    html.push('</tbody></table></div>')
+    html.push('<div class="note-inline dim small">其中 ' + attributed.length + ' 个仓库与项目同名（可归因），' +
+      unattributed.length + ' 个未归因（无 join key，不摊成本）。</div>')
+    if (noCommits.length) {
+      html.push('<details class="yield-zero"><summary>' + noCommits.length +
+        ' 个仓库没有提交（不在上表；不是 0 元，只表示没扫到 commit）</summary>' +
+        '<div class="dim small">' + noCommits.map(function (y: YieldRow) {
+          return esc(y.name) + (y.attributedTo ? '（对得上 ' + esc(y.attributedTo) + '）' : '')
+        }).join('、') + '</div></details>')
+    }
+    html.push('</section>')
+  }
 
   /* 钻取面板 */
   if (st.drillProject) {
@@ -240,6 +328,39 @@ export function renderProjects(data: any, st: UiState, cmp: Record<string, numbe
       html.push('<div class="empty">该项目在当前范围内没有会话活动。</div>')
     }
     html.push('</section>')
+
+    /* 产出 · git（从总览下沉到这里：它得挂在「项目」语境下才谈得上成本） */
+    {
+      const ys = yieldRows(data, projNames).filter(function (y: YieldRow) { return y.name === pname })
+      html.push('<section class="card">')
+      html.push('<h2>该项目产出 · git <span class="hint">本地仓库 commit · 归因按仓库名与项目名同名匹配</span></h2>')
+      if (!ys.length) {
+        html.push('<div class="empty">没有扫到与「' + esc(pname) + '」同名的 git 仓库 —— ' +
+          '该项目的用量有 ' + money(pCost) + ' 费用但无提交可归因（未归因），' +
+          '不是「0 次提交」。</div>')
+      } else {
+        const ysCommits = ys.reduce(function (t: number, y: YieldRow) { return t + y.total }, 0)
+        html.push('<div class="tbl-wrap"><table class="tbl"><thead><tr>' +
+          '<th>仓库</th><th class="num">提交</th><th class="num">每次提交成本</th><th>最近提交</th>' +
+          '</tr></thead><tbody>')
+        ys.forEach(function (y: YieldRow) {
+          const perCommit = y.total > 0 ? pCost / y.total : null
+          html.push('<tr><td class="mname"><b>' + esc(y.name) + '</b><div class="raw">' + esc(y.root) + '</div></td>' +
+            '<td class="num strong">' + fmt(y.total) + '</td>' +
+            '<td class="num strong">' + (perCommit === null
+              ? '<span class="dim">无提交，无法摊算</span>'
+              : money(perCommit)) + '</td>' +
+            '<td class="num">' + esc((y.lastDay || '—') + (y.lastSubject ? ' · ' + y.lastSubject : '')) + '</td></tr>')
+        })
+        html.push('</tbody></table></div>')
+        html.push('<div class="note-inline dim small">' + (ysCommits > 0
+          ? '「每次提交成本」= ' + esc(pname) + ' 在' + esc(rangeLabel) + '的费用 ' + money(pCost) +
+            ' ÷ 该仓库 ' + ysCommits + ' 次提交。仓库名与项目名同名才归因，对不上一律标未归因，不按 0 计。'
+          : esc(pname) + ' 在' + esc(rangeLabel) + '有 ' + money(pCost) + ' 费用，但同名仓库扫不到任何提交 —— ' +
+            '这是「有费用、无提交」，不是 0 成本。') + '</div>')
+      }
+      html.push('</section>')
+    }
 
     html.push('<section class="card">')
     html.push('<h2>该项目会话 <span class="hint">最多列 ' + Math.min(pSess.length, 40) + ' / ' + pSess.length + ' 条</span></h2>')

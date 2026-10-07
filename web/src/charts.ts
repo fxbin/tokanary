@@ -1,5 +1,9 @@
 /* SVG/图例构造器 —— 与仓根 app.js 同名函数逐行对齐的 TS 移植(Slice3b)。
- * 纯字符串构造,无 DOM 依赖,方便单测。 */
+ * 纯字符串构造,无 DOM 依赖,方便单测。
+ *
+ * 填色约定：本文件的 color 槽位传的是 palette.ts 的 `var(--chart-cN)` 引用而非 hex，
+ * 主题切换由 tokens.css 换 token 值完成（夜非反相，勿在业务代码里按主题分支）。
+ * 调用方若绕过 palette.ts 传裸 hex，纸/夜就退回同一套颜色。 */
 import { esc, fmt, money, pct, CATS } from './pricing'
 import { MODEL_COLORS as PALETTE6 } from './palette'
 
@@ -117,6 +121,10 @@ export interface DayRow {
   d: string; total: number; cacheRead: number; cacheWrite: number; input: number; output: number
 }
 
+/* X 轴标签抽稀用的字符度量。`.axis` 在 ui.css 里是 10.5px（见 ui.css:35），
+ * 这里按等宽数字 0.52em/字估宽，再留 12 单位最小间隙。改了那边字号要回来改这里。 */
+const AXIS_CHAR_W = 5.5, AXIS_GAP = 12
+
 export function dayChart(days: DayRow[], costByDay: Record<string, number>): string {
   const w = 940, h = 260, padL = 58, padR = 58, padT = 16, padB = 34
   const plotW = w - padL - padR, plotH = h - padT - padB
@@ -125,6 +133,34 @@ export function dayChart(days: DayRow[], costByDay: Record<string, number>): str
   const maxCost = Math.max.apply(null, days.map(function (d) { return costByDay[d.d] || 0 })) || 1
   const n = days.length, slot = plotW / n, bw = Math.min(46, slot * 0.62)
   const out = ['<svg viewBox="0 0 ' + w + ' ' + h + '" class="chart">']
+
+  /* X 轴标签抽稀：n 天全画会把日期挤成一团糊字（range=all 下 201 天，
+   * 旧稿每根柱子后面都跟一个 "10/7"，连成 1/2/2/2/2/2…）。
+   * 先按最长标签的实测占宽算出最小步长 step，只保留首、尾与步长网格点；
+   * 末位是最重要的锚点，若它与前一个保留点间距不足 step，就把那个点让掉。 */
+  const lbls = days.map(function (d) { return dateShort(new Date(d.d + 'T00:00:00').getTime()) })
+  const lblChars = Math.max.apply(null, lbls.map(function (t) { return t.length })) || 1
+  const lblW = lblChars * AXIS_CHAR_W + AXIS_GAP
+  const step = Math.max(1, Math.ceil(lblW / slot))
+  const keepAt: boolean[] = new Array(n).fill(false)
+  const keep: number[] = []
+  for (let i = 0; i < n; i += step) { keepAt[i] = true; keep.push(i) }
+  if (keep[keep.length - 1] !== n - 1) {
+    // 末位若与前一个保留点间距不足 step，把那个点让掉 —— 末位是最重要的锚点，
+    // 两者挤在一起不如只留末位。
+    if (n - 1 - keep[keep.length - 1] < step) keepAt[keep[keep.length - 1]] = false
+    keepAt[n - 1] = true
+  }
+  // 首尾标签靠边时改用 start/end 锚点，视觉中心不变，但不会被 viewBox 切掉
+  const half = lblW / 2
+  const xLabels = lbls.map(function (t, i) {
+    if (!keepAt[i]) return ''
+    const cx = padL + slot * i + slot / 2
+    let anchor = 'middle', tx = cx
+    if (i === 0 && cx - half < 2) { anchor = 'start'; tx = Math.max(0, cx - half) }
+    else if (i === n - 1 && cx + half > w - 2) { anchor = 'end'; tx = Math.min(w, cx + half) }
+    return '<text x="' + tx.toFixed(1) + '" y="' + (h - 12) + '" text-anchor="' + anchor + '" class="axis">' + esc(t) + '</text>'
+  })
 
   // y 轴刻度(token)
   for (let g = 0; g <= 4; g++) {
@@ -149,7 +185,7 @@ export function dayChart(days: DayRow[], costByDay: Record<string, number>): str
       out.push('<rect x="' + x.toFixed(1) + '" y="' + yBase.toFixed(1) + '" width="' + bw.toFixed(1) +
         '" height="' + sh.toFixed(1) + '" fill="' + s.c + '"><title>' + d.d + ' ' + fmt(s.v) + '</title></rect>')
     })
-    out.push('<text x="' + (x + bw / 2).toFixed(1) + '" y="' + (h - 12) + '" text-anchor="middle" class="axis">' + esc(dateShort(new Date(d.d + 'T00:00:00').getTime())) + '</text>')
+    if (xLabels[i]) out.push(xLabels[i])
     const c = costByDay[d.d] || 0
     line.push([padL + slot * i + slot / 2, padT + plotH - (c / maxCost) * plotH, c, d.d])
   })

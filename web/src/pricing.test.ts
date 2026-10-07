@@ -2,8 +2,8 @@
  * 用法: npm test (web/ 目录下) */
 import { describe, it, expect } from 'vitest'
 import {
-  computeAll, compareSources, dailyCost, modelCost,
-  normalizeCost, normalizeCustomMap, defaultOpts,
+  computeAll, compareSources, dailyCost, modelCost, externalSummary,
+  normalizeCost, normalizeCustomMap, defaultOpts, canonicalModelKey,
   money, fmt, type Cost4
 } from './pricing'
 import { hasCurated, hasGateway, loadDashboardFixture } from './testsupport'
@@ -117,5 +117,92 @@ describe('pricing core', () => {
     expect(money(1234.5)).toBe('$1,234.50')
     expect(fmt(1234567)).toBe('1.23M')
     expect(normalizeCost(null, 'ratio10').ok).toBe(false)
+  })
+})
+
+/* 外部工具夹具:一个缓存占 98.9% 的模型。
+ * 单价 input 4 / output 20 / cache_read 0.2 / cache_write 5(USD/1M)。
+ * 真值 = 1M×4 + 100M×0.2 + 0.1M×20 = 26;四档算术平均 (4+20+0.2+5)/4 = 7.3
+ * 会把同一个模型算成 738 —— 高出 28 倍。 */
+function extFixture(cost: any = { input: 4, output: 20, cache_read: 0.2, cache_write: 5 }) {
+  const m = {
+    id: 'Big-Cache', input: 1000000, cacheRead: 100000000, cacheWrite: 0,
+    output: 100000, reasoning: 50000, total: 101100000,
+    price: { source: 'models.dev', cost }
+  }
+  return {
+    external: {
+      generatedAt: '2026-10-01', totals: { sessions: 1, calls: 1 },
+      tools: [{
+        tool: 'codex', label: 'Codex CLI', sessions: 1, calls: 1,
+        input: m.input, cacheRead: m.cacheRead, cacheWrite: 0, output: m.output,
+        reasoning: 0, total: m.total, models: [m],
+        days: [{
+          d: '2026-10-01', total: m.total, input: m.input,
+          cacheRead: m.cacheRead, cacheWrite: 0, output: m.output, reasoning: 0
+        }]
+      }]
+    }
+  }
+}
+
+describe('external pricing by composition', () => {
+  it('外部模型按真实四段构成计价,远低于四价算术平均', () => {
+    const s = externalSummary(extFixture() as any, 'ratio10')!
+    const row = s.rows[0].models[0]
+    expect(row.priced).toBe(true)
+    near(row.cost, 26)                                    // 4 + 20 + 2
+    near(row.unit, 26 / row.tok.total * 1e6)              // $/1M 综合均价,按构成加权
+    const mean = (4 + 20 + 0.2 + 5) / 4                    // 错的算法:四档单价算术平均
+    expect(mean * row.tok.total / 1e6).toBeGreaterThan(row.cost * 10)
+  })
+
+  it('外部模型缺缓存单价走既有 POLICIES,不另立口径', () => {
+    // 只有 input:ratio10 → cache_read = 0.4、cache_write = 5;zero → 两者 0
+    const ratio = externalSummary(extFixture({ input: 4, output: 20 }) as any, 'ratio10')!
+    near(ratio.rows[0].models[0].cost, 4 + 40 + 2)
+    const zero = externalSummary(extFixture({ input: 4, output: 20 }) as any, 'zero')!
+    near(zero.rows[0].models[0].cost, 4 + 0 + 2)
+    // 缺 input 单价 = 无从推算,整行不计钱
+    const noInput = externalSummary(extFixture({ output: 20, cache_read: 0.2 }) as any, 'ratio10')!
+    expect(noInput.rows[0].models[0].priced).toBe(false)
+    near(noInput.rows[0].models[0].cost, 0)
+  })
+
+  it('pi 侧 unit 同为构成加权(参照实现),不是四价均值', () => {
+    const cost = { input: 4, output: 20, cache_read: 0.2, cache_write: 5 }
+    const d: any = {
+      totals: { cacheRead: 100000000, cacheWrite: 0, input: 1000000, output: 100000 },
+      models: [{
+        key: 'big-cache', rawIds: ['Big-Cache'], turns: 1, missingUsage: 0, statuses: {},
+        cacheRead: 100000000, cacheWrite: 0, input: 1000000, output: 100000,
+        reasoning: 0, total: 101100000
+      }],
+      days: [], dayModel: [], pricing: { 'big-cache': { target: 'big-cache', cost } }
+    }
+    const r = computeAll(d, defaultOpts()).rows[0]
+    near(r.cost, 26)
+    near(r.unit, 26 / 101100000 * 1e6)
+    expect(7.3 * 101.1).toBeGreaterThan(r.cost * 10)
+  })
+})
+
+describe('canonicalModelKey', () => {
+  it('与 Go 侧 clisession.CanonicalModel 逐条对齐', () => {
+    const cases: Array<[string, string]> = [
+      ['azure-gpt-5.6-sol', 'gpt-5.6-sol'],
+      ['kimi/kimi-k3', 'kimi-k3'],
+      ['gpt-5.6-sol--int', 'gpt-5.6-sol'],
+      ['deepseek-v4-flash-ga-260731', 'deepseek-v4-flash'],
+      ['gpt-5.6-sol', 'gpt-5.6-sol'],
+      ['Deepseek-v4-flash', 'deepseek-v4-flash'],
+      ['deepseek/deepseek-v4.1-flash', 'deepseek-v4.1-flash'],
+      ['openai/gpt-5.6-sol-preview', 'gpt-5.6-sol'],
+      ['moonshotai/kimi-k3-260101', 'kimi-k3'],
+      ['  GLM-5.3  ', 'glm-5.3'],
+      ['', '(unknown)']
+    ]
+    cases.forEach(function (c) { expect(canonicalModelKey(c[0])).toBe(c[1]) })
+    expect(canonicalModelKey(null as any)).toBe('(unknown)')
   })
 })

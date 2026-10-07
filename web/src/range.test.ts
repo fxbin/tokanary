@@ -3,11 +3,14 @@
 import { describe, it, expect } from 'vitest'
 import {
   computeAll, compareSources, dailyCost, defaultOpts, money,
+  externalSummary, rangeExt,
   rangeStats, filterDaysByRange, rangeCutoffKey, rangeAnchor,
   filterHoursByRange, hourMatrix, rangeInsights, calcStreak, weekTopModels,
   type RangeKey
 } from './pricing'
 import { renderOverview, renderModels, renderSessions, renderProjects, renderSettings, budgetAlertHtml, defaultUiState } from './render'
+import { externalModelRows } from './render/models'
+import { useHashRoute } from './composables/useHashRoute'
 import { heatmap, MODEL_COLORS } from './charts'
 import { CATS } from './pricing'
 import { mergeDailyUsage } from './range'
@@ -212,6 +215,10 @@ describe('U3 models tab', () => {
     expect(html).toContain('data-field=')
     expect(html).toContain('data-key=')
     expect(html).toContain('范围内 Token')
+    // 单价覆盖 KPI 必须写明是 pi 侧,别让 3/3 看着像全量 29 个模型都匹配上了
+    expect(html).toContain('pi 侧已匹配单价')
+    expect(html).toContain('外部工具 ')
+    expect(html).not.toContain('已匹配价格')
     if (!html.includes('当前范围内没有模型用量')) expect(html).toContain('<svg')
     expect(html).not.toMatch(/NaN/)
     expect(html).not.toMatch(/>undefined</)
@@ -381,19 +388,25 @@ describe('U4 projects tab', () => {
 })
 
 describe('U4 settings tab + budget', () => {
-  itLive('冒烟:预算行/口径 radio/策略 select/自定义源/导入导出/网关表', () => {
+  itLive('冒烟:预算行/单价来源/策略 select/限额/导入导出（无自定义源、无网关表）', () => {
     const st = defaultUiState()
     const cmp = compareSources(DATA, st)
     const html = renderSettings(DATA, st, cmp, '7d', '')
     expect(html).toContain('预算告警')
     expect(html).toContain('id="budget-usd"')
-    expect(html).toContain('name="psrc"')
+    // SOURCES 只剩 models.dev 一个成员，渲染单选框等于给一个没有可选项的孤立圆点；
+    // 改为纯文本陈述，这里反过来断言 radio 不再出现。
+    expect(html).toContain('单价来源')
+    expect(html).not.toContain('name="psrc"')
     expect(html).toContain('id="policy"')
-    expect(html).toContain('id="custom-url"')
     expect(html).toContain('id="btn-export"')
     expect(html).toContain('id="btn-import"')
     expect(html).toContain('id="io"')
-    if ((DATA.gateway || {}).models?.length) expect(html).toContain('网关价目表')
+    // 单价只走 models.dev（AGENTS.md：无网关价源）——自定义价格源与网关价目表已删，
+    // 这里反过来断言它们不再出现，防止有人把它们加回来。
+    expect(html).not.toContain('id="custom-url"')
+    expect(html).not.toContain('自定义价格源')
+    expect(html).not.toContain('网关价目表')
     expect(html).not.toMatch(/NaN/)
     expect(renderSettings(null, st, cmp, '7d', '')).toContain('tokanary refresh')
   })
@@ -597,6 +610,100 @@ describe('U6 week top models', () => {
     // streak=0 显示 —
     expect(html2).toContain('>—<')
     expect(html2).not.toMatch(/NaN/)
+  })
+})
+
+/* ---- P0:外部工具费用按真实 token 构成计价(不是四价算术平均)+ 默认范围 all ---- */
+
+/* 外部工具夹具:每个模型缓存占 98.9%(input 1M / cacheRead 100M / output 0.1M),
+ * 单价 4 / 20 / 0.2 / 5。真值每模型 4 + 20 + 2 = 26;
+ * 四档算术平均 7.3 会把同样 token 算成 738。 */
+function extFixture() {
+  const mk = function (id: string) {
+    return {
+      id, input: 1000000, cacheRead: 100000000, cacheWrite: 0, output: 100000,
+      reasoning: 0, total: 101100000,
+      price: { source: 'models.dev', cost: { input: 4, output: 20, cache_read: 0.2, cache_write: 5 } }
+    }
+  }
+  const day = function (n: number) {
+    return [{
+      d: '2026-10-01', total: 101100000 * n, input: 1000000 * n,
+      cacheRead: 100000000 * n, cacheWrite: 0, output: 100000 * n, reasoning: 0
+    }]
+  }
+  const codex = mk('Big-Cache')
+  const z1 = mk('Deepseek-v4-flash')
+  const z2 = mk('deepseek-v4-flash')      // 与 z1 同模型,只是大小写不同
+  const free = mk('deepseek-v4-flash-free')
+  return {
+    external: {
+      generatedAt: '2026-10-01', totals: { sessions: 3, calls: 3 },
+      tools: [
+        { tool: 'codex', label: 'Codex CLI', sessions: 1, calls: 1, total: codex.total, models: [codex], days: day(1) },
+        {
+          tool: 'zcode', label: 'ZCode', sessions: 2, calls: 2,
+          total: z1.total + z2.total + free.total, models: [z1, z2, free], days: day(3)
+        }
+      ]
+    }
+  }
+}
+
+describe('external cost by token composition', () => {
+  it('rangeExt:缓存占绝大多数的工具按综合均价摊算,远低于四价均值', () => {
+    const data: any = extFixture()
+    const ext = externalSummary(data, 'ratio10')
+    const re = rangeExt(ext, 'all', '2026-10-01')
+    near(re.totalCost, 104)                    // 4 个模型条目 × 26
+    const mean = (4 + 20 + 0.2 + 5) / 4
+    expect(mean * 404.4).toBeGreaterThan(re.totalCost * 10)
+    re.rows.forEach(function (r) { expect(Number.isNaN(r.cost)).toBe(false) })
+  })
+
+  it('externalModelRows:同一原始 id 归一化后只出一行,unit 按合并构成加权', () => {
+    const data: any = extFixture()
+    const rows = externalModelRows(data, 'ratio10')
+    expect(rows.map((r) => r.key).sort())
+      .toEqual(['big-cache', 'deepseek-v4-flash', 'deepseek-v4-flash-free'])
+    expect(new Set(rows.map((r) => r.key)).size).toBe(rows.length)
+    const ds = rows.find((r) => r.key === 'deepseek-v4-flash')!
+    expect(ds.total).toBe(202200000)            // 两个工具的 token 已并到一行
+    near(ds.unit, 26 / 101100000 * 1e6)         // 合并后构成不变,均价仍是构成加权值
+    near(rows.reduce((t, r) => t + r.unit * r.total / 1e6, 0), 104)
+  })
+
+  itLive('真实数据:外部模型行总额 == externalSummary 总额,key 无重复', () => {
+    const st = defaultUiState()
+    const ext = externalSummary(DATA, st.policy)!
+    const rows = externalModelRows(DATA, st.policy)
+    expect(rows.length).toBeGreaterThan(0)
+    expect(new Set(rows.map((r) => r.key)).size).toBe(rows.length)
+    // 构成加权:Σ(unit × total) 必须等于按四段构成算出的总额。
+    // 旧的「四档单价算术平均」口径会算出数倍于此的金额,本断言能锁死它。
+    near(rows.reduce((t, r) => t + r.unit * r.total / 1e6, 0), ext.totalCost)
+    rows.forEach(function (r) { expect(Number.isNaN(r.unit)).toBe(false) })
+  })
+
+  itLive('真实数据:模型视图的范围内费用向总览收敛(不再差数倍)', () => {
+    const st = defaultUiState()
+    const ext = externalSummary(DATA, st.policy)!
+    const re = rangeExt(ext, '7d', rangeAnchor(DATA))
+    const s = computeAll(DATA, st)
+    const piCost = rangeStats(DATA, s, dailyCost(DATA, s), '7d').cost
+    const html = renderModels(DATA, st, compareSources(DATA, st), '7d')
+    const hit = /kpi-v">(\$[\d,.]+)</.exec(html)   // 唯一带 $ 的 KPI = 范围内模型费用
+    expect(hit).not.toBeNull()
+    const shown = Number(String(hit![1]).replace(/[$,]/g, ''))
+    const overview = re.totalCost + piCost
+    expect(overview).toBeGreaterThan(0)
+    expect(Math.abs(shown - overview) / overview).toBeLessThan(0.15)
+  })
+
+  it('默认范围是 all:pi 落后于锚点时不整页为空', () => {
+    const r = useHashRoute(['overview', 'models', 'sessions', 'projects', 'settings'])
+    expect(r.range.value).toBe('all')
+    expect(r.tab.value).toBe('overview')
   })
 })
 

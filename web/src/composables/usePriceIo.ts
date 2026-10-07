@@ -5,13 +5,12 @@ const STORE_KEY = 'pi-token-pricing-v1'
 
 export function usePriceIo(st: UiState) {
   const ioText = ref('')
+  const ioError = ref('')
 
   function saveState() {
     try {
       localStorage.setItem(STORE_KEY, JSON.stringify({
         policy: st.policy, priceSource: st.priceSource, overrides: st.overrides,
-        customUrl: st.customUrl, customPrices: st.customPrices,
-        customFetchedAt: st.customFetchedAt,
         budgetUsd: st.budgetUsd
       }))
     } catch { /* ignore */ }
@@ -23,49 +22,24 @@ export function usePriceIo(st: UiState) {
       if (raw) {
         const o = JSON.parse(raw)
         if (o && typeof o === 'object') {
+          // priceSource 不再持久化：单价只有 models.dev 一个来源
+          // (pricing.PriceSource 是单成员联合)，写回只会是死代码。
           st.priceSource = 'modelsdev'
           if (typeof o.policy === 'string') st.policy = o.policy
           if (o.overrides) st.overrides = o.overrides
-          if (typeof o.customUrl === 'string') st.customUrl = o.customUrl.slice(0, 2048)
-          if (o.customPrices && typeof o.customPrices === 'object') st.customPrices = o.customPrices
-          if (typeof o.customFetchedAt === 'string') st.customFetchedAt = o.customFetchedAt
           if (typeof o.budgetUsd === 'number' && o.budgetUsd >= 0) st.budgetUsd = o.budgetUsd
         }
       }
     } catch { /* 无 localStorage 时忽略 */ }
   }
 
-  async function loadCustomPrices() {
-    const url = (st.customUrl || '').trim()
-    if (!url) {
-      st.customError = '请先填写自定义价格源 URL。'
-      return
-    }
-    if (!/^https?:\/\//i.test(url)) {
-      st.customError = 'URL 需以 http(s):// 开头。'
-      return
-    }
-    try {
-      const res = await fetch(url, { cache: 'no-store' })
-      if (!res.ok) throw new Error('HTTP ' + res.status)
-      const json = await res.json()
-      if (!json || typeof json !== 'object') throw new Error('响应不是 JSON 对象')
-      st.customPrices = json
-      st.customFetchedAt = new Date().toISOString()
-      st.customError = ''
-      saveState()
-    } catch (err) {
-      st.customError = '加载失败：' + (err && (err as Error).message ? (err as Error).message : String(err))
-    }
-  }
-
+  /** 导出：只导手动改价覆盖 + 缺价策略（自定义价格源已删，models.dev 底表不入库）。 */
   function exportPrices() {
     const payload = {
       overrides: st.overrides,
-      customPrices: st.customPrices,
-      priceSource: st.priceSource,
       policy: st.policy
     }
+    ioError.value = ''
     ioText.value = JSON.stringify(payload, null, 2)
   }
 
@@ -74,15 +48,15 @@ export function usePriceIo(st: UiState) {
       const o = JSON.parse(ioText.value || '{}')
       if (!o || typeof o !== 'object') throw new Error('不是对象')
       if (o.overrides && typeof o.overrides === 'object') st.overrides = o.overrides
-      if (o.customPrices && typeof o.customPrices === 'object') st.customPrices = o.customPrices
       st.priceSource = 'modelsdev'
       if (typeof o.policy === 'string') st.policy = o.policy
       saveState()
-      st.customError = ''
+      ioError.value = ''
     } catch (err) {
-      st.customError = '导入失败：' + (err && (err as Error).message ? (err as Error).message : String(err))
+      // 导入失败不静默：单列一行红字，且不动用户粘在框里的原文
+      ioError.value = '导入失败：' + (err && (err as Error).message ? (err as Error).message : String(err))
     }
   }
 
-  return { ioText, saveState, loadState, loadCustomPrices, exportPrices, importPrices }
+  return { ioText, ioError, saveState, loadState, exportPrices, importPrices }
 }

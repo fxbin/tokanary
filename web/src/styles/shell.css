@@ -48,7 +48,7 @@ body {
 }
 .nav-group {
   padding: 10px 10px 4px;
-  font-size: 10px; letter-spacing: .12em; color: var(--t4, var(--dim));
+  font-size: 10px; letter-spacing: .12em; color: var(--dim);
 }
 .nav-item {
   display: flex; align-items: center; gap: 9px;
