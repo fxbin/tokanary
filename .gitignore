@@ -15,6 +15,9 @@ web/coverage/
 /tokanary.exe
 /tokanary-desktop
 /tokanary-desktop.exe
+# Windows cannot overwrite a running .exe, so `go build -o tokanary-desktop.exe .`
+# parks the old image next to it instead of replacing it.
+/tokanary-desktop.exe~
 
 # analysis store (rebuildable)
 *.sqlite
