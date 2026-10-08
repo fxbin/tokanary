@@ -316,6 +316,9 @@ export function externalSummary(data: any, policy: Policy) {
       const cost = n.ok ? costOfTokens(m, n.values) : 0
       return {
         id: m.id, tok: m, price: p, cost, priced: n.ok, estimated: n.ok && n.estimatedFields.length > 0,
+        // 保留具体是哪些字段走了推算。只给一个 estimated 布尔的话，调用方
+        // 只能说「这行有估算」，没法回答「切策略会不会改这行的钱」。
+        estimatedFields: n.estimatedFields,
         unit: m.total > 0 && n.ok ? cost / m.total * 1e6 : 0
       }
     })

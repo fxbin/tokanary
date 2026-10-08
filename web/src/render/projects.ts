@@ -1,7 +1,7 @@
 import {
   fmt, money, pct, CATS, POLICIES, SOURCES,
   normalizeCost, costOfTokens, computeAll, compareSources,
-  dailyCost, externalSummary, rangeStats, rangeExt, rangeAnchor,
+  dailyCost, externalSummary, rangeStats, rangeExt, rangeAnchor, mergeDailyCost, monthToDateCost,
   filterHoursByRange, hourMatrix, rangeInsights, RANGES,
   filterDaysByRange, rangeCutoffKey, calcStreak, weekTopModels,
   type PricingOpts, type PriceSource, type RangeKey
@@ -9,14 +9,29 @@ import {
 import { MODEL_COLORS, stackBar, donut, legend, dayChart, heatmap, trimNum } from '../charts'
 import { th, sourceTag, stableColorIndex, sesRecency, pad2, localDay, esc, emptyStateHtml, type UiState } from './shared'
 
+// 分级阈值是唯一真相源，设置页那句「会在 X% 换色」也从这里生成 ——
+// 旧稿把 50/80/95 写死在设置页文案里、分级逻辑另写一份，加一档就漂一档。
+export const BUDGET_TIERS = [50, 80, 95] as const
+
+// 四档分级。旧稿 >=95 与 >=80 都归 'err'，两个分支完全等价 —— 95% 那一档是死代码，
+// 而设置页的说明文字还写着「50% / 80% / 95% 分级提示」，界面承诺了一个它没有提供的
+// 分辨率：80% 和 99% 在屏幕上长得一模一样，用户会以为红色就等于 95%。
+// 现在 95% 单独一档，各档文案也说实话。
 export function budgetAlertHtml(cost: number, budgetUsd: number): string {
   if (!budgetUsd || budgetUsd <= 0) return ''
   const pctUsed = cost / budgetUsd * 100
-  const level = pctUsed >= 95 ? 'err' : pctUsed >= 80 ? 'err' : pctUsed >= 50 ? 'warn' : 'ok'
-  const tag = level === 'err' ? '注意 · 预算告警' : level === 'warn' ? '注意 · 预算过半' : '预算进度'
-  return '<div class="note budget-' + level + '"><b>' + tag + '</b>：已用 <b>' + money(cost) +
-    '</b> / 预算 <b>' + money(budgetUsd) + '</b>（' + pct(pctUsed) + '）' +
-    (level === 'ok' ? '。在设置页可调整月预算。' : '。请检查模型用量或提高预算。') + '</div>'
+  const level = pctUsed >= BUDGET_TIERS[2] ? 'err2' : pctUsed >= BUDGET_TIERS[1] ? 'err'
+    : pctUsed >= BUDGET_TIERS[0] ? 'warn' : 'ok'
+  const tag = level === 'err2' ? '预算已超'
+    : level === 'err' ? '注意 · 预算快用完'
+      : level === 'warn' ? '注意 · 预算过半'
+        : '预算进度'
+  const tail = level === 'err2' ? '本月至今已超出月预算。'
+    : level === 'err' ? '本月至今已用掉八成以上，可以现在调整。'
+      : level === 'warn' ? '本月至今已过半。'
+        : '本月至今进度。在设置页可调整月预算。'
+  return '<div class="note budget-' + level + '"><b>' + tag + '</b>：本月至今已用 <b>' + money(cost) +
+    '</b> / 预算 <b>' + money(budgetUsd) + '</b>（' + pct(pctUsed) + '）' + tail + '</div>'
 }
 
 /**
@@ -159,8 +174,10 @@ export function renderProjects(data: any, st: UiState, cmp: Record<string, numbe
   }).join(''))
   html.push('</section>')
 
-  /* 预算条 */
-  const ba = budgetAlertHtml(range === 'all' ? (s.totalCost || sumCost) : sumCost, st.budgetUsd)
+  /* 预算条。与设置页同一个口径：全工具、本月至今、与范围无关。
+     旧稿这里传的是范围费用（all 时更是全量），和设置页的「月预算」对不上。 */
+  const ba = budgetAlertHtml(monthToDateCost(mergeDailyCost(
+    dailyCost(data, s), externalSummary(data, st.policy), data)), st.budgetUsd)
   if (ba) html.push(ba)
 
   /* 归因条 */

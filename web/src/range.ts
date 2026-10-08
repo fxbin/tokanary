@@ -47,6 +47,85 @@ export function filterDaysByRange(days: any[], range: RangeKey, anchor?: string 
 
 export interface DayFields { cacheRead: number; cacheWrite: number; input: number; output: number; total: number }
 
+export interface Freshness { text: string; cls: string; stale: string[] }
+
+/** 时间戳有两种写法：meta.generatedAt 是 ISO 带时区，external.generatedAt 是
+ *  「2026-10-08 20:21」这种空格分隔的本地时间。后者直接丢给 new Date() 在部分
+ *  引擎上会按 UTC 解析，先归一成 ISO 形式。 */
+export function parseStamp(s: unknown): number {
+  const t = String(s ?? '').trim()
+  if (!t) return NaN
+  const iso = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}/.test(t) ? t.replace(' ', 'T') : t
+  return new Date(iso).getTime()
+}
+
+/**
+ * 顶栏新鲜度 chip 的文案与配色。
+ *
+ * 时间基准必须是「采集时刻」，不是「读库时刻」。meta.generatedAt 由 dashboard.go
+ * 用 time.Now() 填，桌面路径每 30 秒轮询都会重写它，拿它算相对时间恒为 0 —— 旧稿
+ * 因此永远显示「刚刚刷新」，而实测 8 个外部工具里有 4 个停更数周。真正的采集时刻
+ * 在 external.generatedAt；没有外部数据时才退回 meta。
+ *
+ * 一次采集覆盖所有工具，但每个工具的日志截止日不同，所以同时返回陈旧工具清单：
+ * 只报一个「采集于 X」会把停更的那几个藏在新鲜的后面。
+ */
+export function freshnessChip(data: any, now: Date = new Date(), staleDays = 7): Freshness {
+  const d = data || {}
+  const meta = d.meta || {}
+  const ext = d.external || {}
+  const src = ext.generatedAt || meta.generatedAt
+  const tools = ext.tools || []
+  const cut = now.getTime() - staleDays * 86400000
+  const stale = tools
+    .map(function (t: any) { return { label: String(t.label || ''), ts: parseStamp(t.lastTs) } })
+    .filter(function (x: any) { return x.label && !isNaN(x.ts) && x.ts < cut })
+    .map(function (x: any) { return x.label })
+  if (!src) return { text: '数据时间未知', cls: 'fresh-err', stale }
+  const ts = parseStamp(src)
+  if (isNaN(ts)) return { text: '数据时间未知', cls: 'fresh-err', stale }
+  const mins = Math.max(0, Math.round((now.getTime() - ts) / 60000))
+  const text = mins < 1 ? '刚刚采集'
+    : mins < 60 ? mins + ' 分钟前采集'
+      : mins < 1440 ? Math.floor(mins / 60) + ' 小时前采集'
+        : Math.floor(mins / 1440) + ' 天前采集'
+  // 采集时刻新，不代表每个工具的日志都新。实测 8 个外部工具里有 4 个停更数周，
+  // 只报「35 分钟前采集」并给绿色，等于用采集时间的鲜度替停更工具背书 ——
+  // 分源陈旧不再只写在 hover 里，chip 自己也要说。
+  const n = stale.length
+  const label = text + (n ? ' · ' + n + ' 家已停更' : '')
+  let cls = mins < 180 ? 'fresh-ok' : mins < 1440 ? 'fresh-warn' : 'fresh-err'
+  if (n && cls === 'fresh-ok') cls = 'fresh-warn'
+  return { text: label, cls, stale }
+}
+
+/**
+ * 当月至今的费用合计。入参是「日 -> 费用」表（dailyCost / mergeDailyCost 的产物）。
+ *
+ * 预算比值的分子必须是本月至今，而不是当前范围的费用：预算是与时间范围无关的
+ * 目标量，拿「近 7 天费用」去除「月预算」得到的既不是进度也不是速率，读不出能
+ * 支撑决策的东西，而且顶栏一切换范围结论就翻转 —— 设 1000 月预算，切「今天」
+ * 显示 4%、切「全部」显示 91%。这与 f752855 砍掉套餐额度是同一种谎。
+ *
+ * 「当月」取真实日历月，不是数据最新日所在的月：月预算本来就是针对日历月的，
+ * 用数据最新日反推会在跨越月末时凭空多出或少掉一个月。
+ */
+export function monthToDateCost(
+  costByDay: Record<string, number>, now: Date = new Date()
+): number {
+  const ym = now.getFullYear() + '-' + String(now.getMonth() + 1).padStart(2, '0')
+  const today = ym + '-' + String(now.getDate()).padStart(2, '0')
+  let sum = 0
+  for (const k in costByDay) {
+    if (k.length < 10 || k.slice(0, 7) !== ym) continue
+    // 「至今」不含未来：系统时钟被调回、或日志里带了偏移的未来日期时，
+    // 不该把还没发生的天数算进「本月已花」。
+    if (k > today) continue
+    sum += costByDay[k] || 0
+  }
+  return sum
+}
+
 /**
  * 合并 pi 仓库 days 与各 external 工具 days，得到「全工具」逐日序列。
  * 主图/近 N 天 KPI 必须用这个，否则 pi 过期时窗口会整段空掉。
