@@ -7,8 +7,8 @@ import {
   type RangeKey
 } from './pricing'
 import {
-  renderPage, renderOverview, renderProjects, renderSessions, renderSettings, renderModels,
-  defaultUiState, missingSections, esc, type UiState
+  renderOverview, renderProjects, renderSessions, renderSettings, renderModels,
+  defaultUiState, esc, type UiState
 } from './render'
 import { hasAnyPricing, loadDashboardFixture } from './testsupport'
 import { windowUsage, USAGE_WINDOWS } from './usage'
@@ -25,6 +25,20 @@ function overview(range: RangeKey, ui?: Partial<UiState>): string {
   return renderOverview(DATA, s, cmp, range)
 }
 
+/** 全部 Tab 的渲染结果拼在一起 —— 页面由 App.vue 分 Tab 装配，
+ *  所以「整页」冒烟就是把五个渲染器的输出接起来。 */
+function allTabs(data: any, ui?: Partial<UiState>, range: RangeKey = 'all'): string {
+  const s = Object.assign(defaultUiState(), ui || {})
+  const c = compareSources(data, s)
+  return [
+    renderOverview(data, s, c, range),
+    renderModels(data, s, c, range),
+    renderSessions(data, s, c, range),
+    renderProjects(data, s, c, range),
+    renderSettings(data, s, c, range, '')
+  ].join('\n')
+}
+
 /** 项目视图钻取到某项目时的产出表（0 提交仓库折进 details，不在首层）。 */
 function projectsHtml(drill: string | null, ui?: Partial<UiState>): string {
   const s = Object.assign(defaultUiState(), ui || {})
@@ -32,30 +46,65 @@ function projectsHtml(drill: string | null, ui?: Partial<UiState>): string {
   return renderProjects(DATA, s, cmp, 'all')
 }
 
-suite('renderPage walkthrough', () => {
-  it('8 区块 + 输入框 + 渠道下拉 + SVG 齐全', () => {
-    expect(missingSections(renderPage(DATA, st, cmp, ''), DATA)).toEqual([])
+/** 全部 Tab 的区块冒烟：返回缺失的区块标记。 */
+function missingSections(html: string, data: any, range: RangeKey): string[] {
+  // Markers are the <h2> titles the section renderers actually emit today.
+  // They drifted once with the old whole-page renderer, which turned five of
+  // these checks into no-ops - hence the range-aware session title and the
+  // hint-qualified ones, so a word appearing in prose cannot satisfy them.
+  const markers = [
+    '模型 Token 构成', '模型费用占比', '模型明细与单价',
+    '<h2>洞察', '本周 Top 模型', '活动热力图', '跨工具总览', '项目归因',
+    '>' + RANGES[range].label + ' 会话 ', '价格设置',
+    'data-field="cache_read"', '<svg'
+  ]
+  // The per-model channel dropdown only exists when a model actually offers
+  // more than one channel. With no price table (a fresh clone ships none -
+  // .cache/prices-raw.json is generated locally) there is nothing to switch
+  // between, so requiring the marker would report a section that was never
+  // applicable. Pass `data` to make the check honest; omit it to demand it.
+  if (!data || hasVariants(data)) markers.push('data-variant=')
+  const miss: string[] = []
+  markers.forEach(function (m) { if (html.indexOf(m) < 0) miss.push(m) })
+  return miss
+}
+
+/** True when at least one priced model offers a channel choice. */
+function hasVariants(data: any): boolean {
+  const models = ((data || {}).models || []) as any[]
+  return models.some(function (m) {
+    const meta = ((data.pricing || {})[m.key] || {}) as any
+    const vs = meta.variants || []
+    return vs.length > 1
+  })
+}
+
+suite('全部分块：冒烟与契约', () => {
+  it('各 Tab 的区块齐全 + 输入框 + 渠道下拉 + SVG', () => {
+    expect(missingSections(allTabs(DATA, undefined, 'all'), DATA, 'all')).toEqual([])
   })
 
   it('KPI 总额 == 逻辑层总额', () => {
     const total = money(computeAll(DATA, st).totalCost)
-    expect(renderPage(DATA, st, cmp, '')).toContain(total)
+    expect(allTabs(DATA, undefined, 'all')).toContain(total)
   })
 
   it('无 undefined/NaN 泄漏', () => {
-    const html = renderPage(DATA, st, cmp, '')
+    const html = allTabs(DATA, undefined, 'all')
     expect(html).not.toMatch(/>undefined</)
     expect(html).not.toMatch(/NaN/)
   })
 
   it('非 models.dev 来源仍标出来(调用方传入自定义单价时不冒充 models.dev)', () => {
-    const st2 = defaultUiState()
-    st2.customPrices = { 'gpt-5.6-sol': { input: 1, output: 2, cache_read: 0.1, cache_write: 0.2 } }
-    expect(renderPage(DATA, st2, cmp, '')).toContain('自定义源')
+    const ui: Partial<UiState> = {}
+    const s = defaultUiState()
+    s.customPrices = { 'gpt-5.6-sol': { input: 1, output: 2, cache_read: 0.1, cache_write: 0.2 } }
+    Object.assign(ui, s)
+    expect(allTabs(DATA, ui, 'all')).toContain('自定义源')
   })
 
   it('缺 data 时给出生效提示而非抛错', () => {
-    const html = renderPage(null, st, cmp, '')
+    const html = renderOverview(null, st, cmp, 'all')
     expect(html).toContain('tokanary refresh')
     expect(html).not.toContain('build_data.py')
   })
@@ -63,14 +112,13 @@ suite('renderPage walkthrough', () => {
   it('缺 gateway 段时降级到 models.dev 而非抛错', () => {
     const noGw: any = JSON.parse(JSON.stringify(DATA))
     noGw.gateway = null
-    const st2 = defaultUiState()
-    const html = renderPage(noGw, st2, compareSources(noGw, st2), '')
+    const html = renderOverview(noGw, defaultUiState(), compareSources(noGw, defaultUiState()), 'all')
     expect(html).not.toContain('>undefined<')
     expect(html).not.toMatch(/NaN/)
     expect(html).toContain('计费口径')
   })
 
-  it('全新克隆(无任何价格表)仍渲染完整且 8 区块齐全', () => {
+  it('全新克隆(无任何价格表)仍渲染完整且区块齐全', () => {
     // This is what a fresh clone looks like: .cache/prices-raw.json is
     // gitignored, so `tokanary prices` has not been run yet. Token totals must
     // still be right and every section must still render - only the money
@@ -82,10 +130,9 @@ suite('renderPage walkthrough', () => {
     for (const t of ((bare.external || {}).tools || [])) {
       for (const k of Object.keys(t.models || {})) t.models[k].price = { source: 'unpriced' }
     }
-    const st2 = defaultUiState()
     expect(hasAnyPricing(bare)).toBe(false)
-    const html = renderPage(bare, st2, compareSources(bare, st2), '')
-    expect(missingSections(html, bare)).toEqual([])
+    const html = allTabs(bare, undefined, 'all')
+    expect(missingSections(html, bare, 'all')).toEqual([])
     expect(html).not.toContain('>undefined<')
     expect(html).not.toMatch(/NaN/)
     expect(html).toContain('0')
