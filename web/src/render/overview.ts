@@ -158,11 +158,20 @@ export function renderOverview(data: any, st: UiState, cmp: Record<string, numbe
     }
   }
 html.push('<section class="card insights">')
-  html.push('<h2>洞察 <span class="hint">' + esc(rangeLabel) + ' · 随口径与范围实时变</span></h2>')
+  html.push('<h2>洞察 <span class="hint">' + esc(rangeLabel) + ' · 仅 pi 侧（按 dayModel 算，逐日逐模型只有 pi 有）</span></h2>')
   html.push('<div class="ins-row">' + insItems.map(function (k) {
     return '<div class="ins"><div class="ins-l">' + esc(k.label) +
       '</div><div class="ins-v">' + esc(k.value) + '</div><div class="ins-s">' + esc(k.sub) + '</div></div>'
   }).join('') + '</div>')
+  // 四个 0 加一句「按 0 个活跃日」会被读成「算坏了」或「数据丢了」。
+  // 说清楚是 pi 侧口径 + 该窗口内 pi 没有用量，并给出窗口外的最后一次。
+  if (!ins.dayCount) {
+    const piLastDay = ((data.days || []) as any[]).map(function (d: any) { return d.d }).filter(Boolean).sort().pop() || ''
+    html.push('<div class="note-inline dim small">这四个 0 不是算错：它们只统计 pi 侧' +
+      (piLastDay ? '，而 pi 在「' + esc(rangeLabel) + '」内没有用量，最后一次是 ' + esc(piLastDay) +
+        '。跨工具的用量见下面「跨工具总览」。' : '，而当前没有 pi 用量。跨工具的用量见下面「跨工具总览」。') +
+      '</div>')
+  }
   html.push('</section>')
 
   /* 本周 Top 模型(U6)。
@@ -204,14 +213,24 @@ html.push('<section class="card insights">')
   }
   html.push('</section>')
 
-  /* 日历 heatmap:weekday × hour,消费 hours 契约;缺 hours 时降级文案 */
-  const rangeHours = filterHoursByRange((data.hours || []) as any, range, rangeAnchor(data))
+  /* 日历 heatmap:weekday × hour,消费 hours 契约。
+     小时粒度只有 pi 侧有(外部工具的日志是逐日的),所以这块天然只看 pi。
+     全 0 有两种成因,文案必须分清:仓库压根没有 hours 字段(跑 refresh 能拿到),
+     还是 hours 有但都落在当前窗口之外(refresh 也拿不到,别再让用户白跑一次)。 */
+  const allHours = (data.hours || []) as any[]
+  const piLastHour = allHours.map(function (x) { return String(x.h || '') }).filter(Boolean).sort().pop() || ''
+  const rangeHours = filterHoursByRange(allHours as any, range, rangeAnchor(data))
   html.push('<section class="card">')
-  html.push('<h2>活动热力图 <span class="hint">星期 × 小时 · 格色 = token 强度 · 鼠标悬停看该格明细</span></h2>')
-  if (!(data.hours || []).length) {
-    html.push('<div class="empty">重新跑 tokanary refresh 获取小时粒度（仓库需含 hours 字段）。</div>')
+  html.push('<h2>活动热力图 <span class="hint">星期 × 小时 · 仅 pi 侧（外部工具日志是逐日的） · 格色 = token 强度</span></h2>')
+  if (!allHours.length) {
+    html.push('<div class="empty">仓库还没有小时粒度数据 —— 重新跑 tokanary refresh 获取。</div>')
   } else {
-    html.push(heatmap(hourMatrix(rangeHours)))
+    html.push(heatmap(hourMatrix(rangeHours), {
+      emptyText: range === 'all'
+        ? 'pi 侧的小时粒度数据为空。'
+        : 'pi 在「' + rangeLabel + '」内没有小时粒度数据 —— 最后一次小时级用量在 ' +
+          piLastHour.slice(0, 10) + '，跑 refresh 也拿不到更近的（这段区间 pi 本就没有用量）。'
+    }))
   }
   html.push('</section>')
 

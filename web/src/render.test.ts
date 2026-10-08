@@ -4,7 +4,7 @@ import { describe, it, expect } from 'vitest'
 import {
   computeAll, compareSources, money, dailyCost, externalSummary, fmt,
   rangeStats, rangeExt, rangeAnchor, withMergedDays, mergeDailyCost, RANGES,
-  type RangeKey
+  filterHoursByRange, type RangeKey
 } from './pricing'
 import {
   renderOverview, renderProjects, renderSessions, renderSettings, renderModels,
@@ -78,6 +78,75 @@ function hasVariants(data: any): boolean {
     return vs.length > 1
   })
 }
+
+suite('洞察与热力图：全 0 必须说清成因', () => {
+  // 这两块只吃 pi 侧（dayModel / hours 只有 pi 有），而 pi 的数据停在 09-20。
+  // 于是切到 7d/30d 时它们全 0。旧稿把四个 0 和一句「重新跑 refresh」摆在那里，
+  // 两处都在说谎：读起来像算坏了，而 refresh 也拿不到 9 月 20 号之后的数据。
+  //
+  // 断言必须限定在各自区块内 —— 两个标题都含「仅 pi 侧」，全篇 toContain 会让
+  // 任何一处的改动满足另一处的断言（这个坑踩过一轮，变异测试才暴露出来）。
+
+  /** 取出从 <h2>标题 到该 section 结束的片段。 */
+  function blockOf(html: string, h2: string): string {
+    const i = html.indexOf(h2)
+    if (i < 0) return ''
+    const j = html.indexOf('</section>', i)
+    return html.slice(i, j < 0 ? html.length : j)
+  }
+
+  it('洞察标题点明是 pi 侧口径', () => {
+    for (const range of ['all', '30d', '7d'] as RangeKey[]) {
+      expect(blockOf(overview(range), '<h2>洞察'), 'range=' + range).toContain('仅 pi 侧')
+    }
+  })
+
+  it('pi 在窗口内无用量时，四个 0 下面必须给出成因与窗口外的最后一次', () => {
+    const s = computeAll(DATA, st)
+    const piByDay = dailyCost(DATA, s)
+    for (const range of ['30d', '7d'] as RangeKey[]) {
+      const dayCount = rangeStats(DATA, s, piByDay, range).dayCount
+      if (dayCount > 0) continue // 这份 fixture 的 pi 若延到窗口内，本条不适用
+      const ins = blockOf(overview(range), '<h2>洞察')
+      const piLastDay = ((DATA.days || []) as any[]).map(function (d: any) { return d.d })
+        .filter(Boolean).sort().pop()
+      expect(ins, 'range=' + range).toContain(piLastDay)
+      expect(ins, 'range=' + range).toContain('不是算错')
+      // 不能暗示跑 refresh 就能解决
+      expect(ins, 'range=' + range).not.toContain('重新跑 tokanary refresh')
+    }
+  })
+
+  it('窗口内无 hours 时说清「最后一次在哪天」，而不是喊用户去跑 refresh', () => {
+    const hours = (DATA.hours || []) as any[]
+    if (!hours.length) return // 没有 hours 的 fixture 走另一条分支
+    const last = hours.map(function (x) { return String(x.h || '') }).filter(Boolean).sort().pop() as string
+    let checked = 0
+    for (const range of ['30d', '7d'] as RangeKey[]) {
+      if (filterHoursByRange(hours as any, range, rangeAnchor(DATA)).length > 0) continue
+      const heat = blockOf(overview(range), '<h2>活动热力图')
+      expect(heat, 'range=' + range).toContain(last.slice(0, 10))
+      expect(heat, 'range=' + range).toContain('拿不到更近的')
+      checked++
+    }
+    // 防止 fixture 变化后这条悄悄变成 no-op
+    expect(checked, '至少要有一个窗口落在 hours 范围之外').toBeGreaterThan(0)
+  })
+
+  it('仓库压根没有 hours 时说的是另一件事', () => {
+    const bare: any = JSON.parse(JSON.stringify(DATA))
+    bare.hours = []
+    const s = defaultUiState()
+    const html = renderOverview(bare, s, compareSources(bare, s), '7d')
+    const heat = blockOf(html, '<h2>活动热力图')
+    expect(heat).toContain('仓库还没有小时粒度数据')
+    expect(heat).not.toContain('拿不到更近的')
+  })
+
+  it('热力图标题点明只有 pi 侧有小时粒度', () => {
+    expect(blockOf(overview('7d'), '<h2>活动热力图')).toContain('仅 pi 侧（外部工具日志是逐日的）')
+  })
+})
 
 suite('全部分块：冒烟与契约', () => {
   it('各 Tab 的区块齐全 + 输入框 + 渠道下拉 + SVG', () => {

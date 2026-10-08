@@ -233,8 +233,10 @@ export function dayChart(days: DayRow[], costByDay: Record<string, number>): str
   return out.join('')
 }
 
-/** weekday×hour 活动热力格(7 行 × 24 列)。matrix[w][h]=token;全 0 或空返回降级提示。 */
-export function heatmap(matrix: number[][], opts: { caption?: string } = {}): string {
+/** weekday×hour 活动热力格(7 行 × 24 列)。matrix[w][h]=token;全 0 或空返回降级提示。
+ *  `emptyText`:全 0 有两种成因 —— 仓库根本没有小时粒度,或窗口内没有。图表层只看得到
+ *  一张全 0 矩阵,分不清是哪种,所以由调用方(知道全量与范围两份数据)传入准确说法。 */
+export function heatmap(matrix: number[][], opts: { caption?: string; emptyText?: string } = {}): string {
   const rows = matrix && matrix.length === 7 ? matrix : null
   let max = 0
   let sum = 0
@@ -249,7 +251,7 @@ export function heatmap(matrix: number[][], opts: { caption?: string } = {}): st
     })
   }
   if (!rows || !nonzero || !max) {
-    return '<div class="empty">暂无小时粒度数据 —— 重新跑 tokanary refresh 获取小时粒度后可见热力图。</div>'
+    return '<div class="empty">' + (opts.emptyText || '暂无小时粒度数据 —— 重新跑 tokanary refresh 获取小时粒度后可见热力图。') + '</div>'
   }
   const WAYS = ['日', '一', '二', '三', '四', '五', '六']
   const cell = 28, gap = 3, padL = 36, padT = 22, padB = 8, padR = 8
