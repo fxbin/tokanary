@@ -91,7 +91,7 @@ func insert(db *sql.DB, d *pidata.Data, cli *clisession.Result) error {
 	}
 
 	if len(d.Projects) > 0 {
-		st, err := tx.Prepare(`INSERT OR REPLACE INTO projects(id, name) VALUES (?,?)`)
+		st, err := tx.Prepare(`INSERT OR REPLACE INTO projects(id, name, path) VALUES (?,?,?)`)
 		if err != nil {
 			return err
 		}
@@ -99,7 +99,7 @@ func insert(db *sql.DB, d *pidata.Data, cli *clisession.Result) error {
 			// projects.id is TEXT so the CLI ingest can key by cwd; the
 			// sqlite-side ids are integers, so stringify them the same way
 			// python's varchar column stored them
-			if _, err := st.Exec(strconv.FormatInt(r.ID, 10), r.Name); err != nil {
+			if _, err := st.Exec(strconv.FormatInt(r.ID, 10), r.Name, r.Path); err != nil {
 				st.Close()
 				return err
 			}
@@ -167,10 +167,11 @@ func insert(db *sql.DB, d *pidata.Data, cli *clisession.Result) error {
 		}
 		// CLI projects are keyed by cwd (not the sqlite integer id) and land in
 		// the same table, which is why totals.projects grows by one per CLI
-		// project. Omitting this silently undercounts it.
-		for _, name := range cli.Projects {
-			if _, err := tx.Exec(`INSERT OR REPLACE INTO projects(id, name) VALUES (?,?)`,
-				name, name); err != nil {
+		// project. Omitting this silently undercounts it. Here the id already IS
+		// the directory, so it doubles as the path the git panel needs.
+		for _, cwd := range cli.Projects {
+			if _, err := tx.Exec(`INSERT OR REPLACE INTO projects(id, name, path) VALUES (?,?,?)`,
+				cwd, filepath.Base(cwd), cwd); err != nil {
 				return err
 			}
 		}
@@ -398,6 +399,12 @@ type Usage struct {
 	FirstTs      sql.NullInt64          `json:"firstTs"`
 	LastTs       sql.NullInt64          `json:"lastTs"`
 	DBVersion    sql.NullInt64          `json:"dbVersion"`
+
+	// ProjectPaths maps a project name to its working directory, for the git
+	// panel. It is a lookup table rather than payload: nothing on the dashboard
+	// renders it, and keeping it out of the JSON stops it from leaking into the
+	// parity comparison against the reference payload.
+	ProjectPaths map[string]string `json:"-"`
 }
 
 // ExportUsage runs the aggregates and assembles the usage payload.
@@ -451,6 +458,9 @@ func ExportUsage(db *sql.DB) (*Usage, error) {
 		return nil, err
 	}
 	if u.Projects, err = scanProjects(db); err != nil {
+		return nil, err
+	}
+	if u.ProjectPaths, err = scanProjectPaths(db); err != nil {
 		return nil, err
 	}
 	if u.SessionsAll, err = scanSessions(db); err != nil {
@@ -658,6 +668,40 @@ func scanProjects(db *sql.DB) ([]ProjectRow, error) {
 	}
 	// python sorts descending by total here, not in SQL
 	sort.SliceStable(out, func(i, j int) bool { return out[i].Total > out[j].Total })
+	return out, rows.Err()
+}
+
+// scanProjectPaths reads the name -> working directory table the git panel
+// needs. Rows without a path are skipped rather than stored as empty strings:
+// an empty root would make ProjectGit look at the current directory, and a
+// project whose path is unknown is not the same thing as one at "".
+//
+// A warehouse written before the path column existed is tolerated, and only
+// that. The read path serves the dashboard from this file, so failing here on an
+// old artifact would blank the whole page until the next refresh; the git panel
+// simply goes back to being empty, which is what it did before the column
+// landed. Every other error still propagates, so a genuine query bug is not
+// hidden behind the same tolerance.
+func scanProjectPaths(db *sql.DB) (map[string]string, error) {
+	rows, err := db.Query(`SELECT name, path FROM projects
+        WHERE path IS NOT NULL AND path <> ''`)
+	if err != nil {
+		if strings.Contains(err.Error(), "no such column") {
+			return map[string]string{}, nil
+		}
+		return nil, fmt.Errorf("project paths: %w", err)
+	}
+	defer rows.Close()
+	out := map[string]string{}
+	for rows.Next() {
+		var name, path sql.NullString
+		if err := rows.Scan(&name, &path); err != nil {
+			return nil, err
+		}
+		if name.String != "" && path.String != "" {
+			out[name.String] = path.String
+		}
+	}
 	return out, rows.Err()
 }
 

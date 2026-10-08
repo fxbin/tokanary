@@ -238,7 +238,7 @@ func AssembleFromUsage(opt Options, usage *warehouse.Usage, cliStats map[string]
 		Pricing:      pricingMap,
 		PricingMeta:  pricingMeta,
 		External:     external,
-		Yield:        yield.ProjectGit(yield.DiscoverRoots(home)),
+		Yield:        yield.ProjectGit(projectRoots(home, usage)),
 	}
 	if opt.AIEnable {
 		var items []ai.TitleTokens
@@ -260,6 +260,28 @@ func AssembleFromUsage(opt Options, usage *warehouse.Usage, cliStats map[string]
 		payload.Meta.RangeEnd = re
 	}
 	return payload, nil
+}
+
+// projectRoots resolves a project name to the directory its git activity lives
+// in.
+//
+// The warehouse is the authority: it carries the working directory pi recorded
+// for every project, on every platform, and it is already open on this path.
+// yield.DiscoverRoots only contributes the two optional third-party agent
+// databases, so it is consulted first and then overridden - it guesses from
+// `session.directory`, which is a different agent's idea of where work happened
+// and can disagree with pi's own record.
+func projectRoots(home string, usage *warehouse.Usage) map[string]string {
+	roots := yield.DiscoverRoots(home)
+	if usage == nil {
+		return roots
+	}
+	for name, path := range usage.ProjectPaths {
+		if path != "" {
+			roots[name] = path
+		}
+	}
+	return roots
 }
 
 // Meta is an optional pre-built meta block (refresh knows the real source paths).
