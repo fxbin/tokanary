@@ -37,7 +37,6 @@ type Manifest struct {
 	ReasoningIsSub *bool    `json:"reasoningIsSubsetOfOutput"`
 
 	Enabled *bool  `json:"enabled"`
-	Group   string `json:"group"`
 	Note    string `json:"note"`
 	Caveat  string `json:"caveat"`
 

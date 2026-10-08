@@ -78,8 +78,7 @@ usage:
                                  assemble the dashboard JSON: usage +
                                  pricing + external
   tokanary collect [--adapters <dir>] [--out <.cache/external-usage.json>]
-                   [--tools a,b] [--home <dir>] [--work-dir <dir>]
-                   [--include-aggregators] [--full]
+                   [--tools a,b] [--home <dir>] [--work-dir <dir>] [--full]
                                  run the adapter engine over every external
                                  tool and write .cache/external-usage.json
                                  (skip tools whose source files are unchanged

@@ -255,13 +255,9 @@ func orQ(s string) string {
 	return s
 }
 
-// drivers is the registry a manifest's "driver" field resolves against.
+// drivers is the registry a manifest's "driver" field resolves against. It is
+// unexported on purpose: Run dispatches through it and Validate checks a name
+// against it, and neither needs to be reachable from outside the package.
 var drivers = map[string]func([]*rawObj, *Manifest, *Context) []Record{
 	"codex": codex,
-}
-
-// GetDriver exposes the registry for --validate parity.
-func GetDriver(name string) (func([]*rawObj, *Manifest, *Context) []Record, bool) {
-	d, ok := drivers[name]
-	return d, ok
 }

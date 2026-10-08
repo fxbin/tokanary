@@ -19,7 +19,6 @@ type collectOpts struct {
 	tools        string
 	home         string
 	workDir      string
-	includeAgg   bool
 	listOnly     bool
 	validateOnly bool
 	full         bool
@@ -71,8 +70,6 @@ func runCollect(args []string) int {
 				i++
 				o.workDir = args[i]
 			}
-		case "--include-aggregators":
-			o.includeAgg = true
 		case "--list":
 			o.listOnly = true
 		case "--validate":
@@ -121,20 +118,20 @@ func runCollect(args []string) int {
 
 	enabled := make([]*sources.Manifest, 0, len(manifests))
 	for _, m := range manifests {
-		if m.IsEnabled() || o.includeAgg {
+		if m.IsEnabled() {
 			enabled = append(enabled, m)
 		}
 	}
 
 	if o.listOnly {
-		fmt.Printf("%-28s%-12s%-10s%-8s%s\n", "id", "kind", "group", "driver", "state")
+		fmt.Printf("%-28s%-12s%-10s%s\n", "id", "kind", "driver", "state")
 		for _, m := range manifests {
 			state := "off"
-			if m.IsEnabled() || o.includeAgg {
+			if m.IsEnabled() {
 				state = "on"
 			}
-			fmt.Printf("%-28s%-12s%-10s%-8s%s\n", m.ID, m.KindOrDefault(),
-				groupOr(m.Group, "builtin"), orDash(m.Driver), state)
+			fmt.Printf("%-28s%-12s%-10s%s\n", m.ID, m.KindOrDefault(),
+				orDash(m.Driver), state)
 		}
 		return 0
 	}
@@ -325,13 +322,6 @@ func trimStr(s string) string {
 		end--
 	}
 	return s[start:end]
-}
-
-func groupOr(g, def string) string {
-	if g == "" {
-		return def
-	}
-	return g
 }
 
 func orDash(s string) string {

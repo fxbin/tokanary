@@ -10,7 +10,7 @@ data/adapters/claude-code.json ─┐
 data/adapters/codex.json ───────┤
 data/adapters/opencode.json ────┤
 data/adapters/deepseek-harness.json ─┤
-data/adapters/deepseek-harness-wrapper.json ─┼─► internal/sources ─► 规范记录 ─► data/external-usage.json ─► data.js ─► 页面
+data/adapters/deepseek-harness-wrapper.json ─┼─► internal/sources ─► 规范记录 ─► .cache/external-usage.json ─► 看板 external 区块
 data/adapters/<你的工具>.json ──┘          ▲
                                           └── drivers.go（只有怪癖才需要）
 ```
@@ -139,8 +139,7 @@ zstd 由 Go 二进制内置（`github.com/klauspost/compress`），**不需要�
 | `inputSubtract` | 从 input 里扣掉这些路径的值（Codex 用：`cached_input_tokens` + `cache_write_input_tokens`） |
 | `outputAdd` | 把这些路径的值加进 output（OpenCode 用：`tokens.reasoning`） |
 | `reasoningIsSubsetOfOutput` | 默认 `true`（自动 clamp 到 output）；`false` 表示 reasoning 独立 |
-| `enabled` | `false` 则不参与采集（默认 `true`） |
-| `group` | `builtin`（默认）/ `aggregator`（第三方聚合器）；仅用于 `--list` 的分组展示 |
+| `enabled` | `false` 则不参与采集（默认 `true`）。这是永久开关：`collect` 没有「临时纳入禁用适配器」的口子 |
 | `driver` | 交给 `drivers.go` 里的函数处理（见下） |
 | `caveat` | 已知的坑，展示在页面卡片上 |
 
@@ -228,7 +227,6 @@ tokanary collect                     # 真正采集；路径变量解析不了�
 ---
 
 其它可用 flag：`--adapters`（指定目录）、`--home`、`--work-dir`、
-`--include-aggregators`（把 `enabled:false` 的也一并纳入）、
 单价只用 models.dev 公开价（`.cache/prices-raw.json`，由 `tokanary prices` 生成）。
 
 `--validate` 会检查：必填字段、kind 合法、fields 至少能取到 model/input/output、driver 是否存在。
@@ -245,8 +243,3 @@ tokanary collect                     # 真正采集；路径变量解析不了�
 | `opencode` | sqlite | reasoning 可加，需并入 output | 本机验证 |
 | `deepseek-harness` | zstd-jsonl | 官方 home（`~/.dsh` / `$DSH_HOME`）；`inputTokens` 已非缓存（禁 inputSubtract）；信封 `time` 为 Unix ms → ISO；按 `data.message.id` 去重 | 本机无原生数据（0 文件，路径就绪） |
 | `deepseek-harness-wrapper` | zstd-jsonl | 三方包装壳 home（本机 dataelement DSH Desktop → `%APPDATA%\dsh-desktop\harness`）；schema 同官方 | 本机验证（191 文件 / 2006.7M token） |
-
-> 早期版本还带一个聚合器适配器（`enabled:false`，兜底覆盖 39 个工具）。
-> 它与内置适配器重叠、同时开会重复计数，且其 `input_tokens` 仍含 `cache_creation_input_tokens`，
-> 已随 Python 管线一并移除。如果你在 Cursor / Gemini 这类没有内置适配器的工具上有数据，
-> 写一份自己的适配器比开聚合器更安全。
