@@ -39,7 +39,7 @@ func msToISO(ms int64) string {
 
 // normalize turns one raw record into a canonical record per the manifest, or
 // nil when the record does not qualify.
-func normalize(r *rawObj, m *Manifest, ctx *Context, seen map[string]bool) *Record {
+func normalize(r *rawObj, m *Manifest, ctx *Context) *Record {
 	obj := r.Obj
 	// hard requirements
 	for _, req := range m.Require {
@@ -95,31 +95,6 @@ func normalize(r *rawObj, m *Manifest, ctx *Context, seen map[string]bool) *Reco
 	if m.ReasoningIsSubsetOfOutput() && rs > out {
 		rs = out
 	}
-
-	// dedup key
-	var dedupKey string
-	if len(m.Dedup) > 0 {
-		parts := make([]string, 0, len(m.Dedup))
-		any := false
-		for _, p := range m.Dedup {
-			s := str(firstOf(obj, []string{p}))
-			if s != "" {
-				any = true
-			}
-			parts = append(parts, s)
-		}
-		if any {
-			dedupKey = m.ID + ":" + joinStr(parts, ":")
-		}
-	}
-	if dedupKey == "" {
-		dedupKey = m.ID + ":" + r.File + "#" + strconv.Itoa(r.Line)
-	}
-	if seen[dedupKey] {
-		ctx.Dropped++
-		return nil
-	}
-	seen[dedupKey] = true
 
 	if tokIn+cr+cw+out == 0 {
 		return nil
@@ -180,6 +155,66 @@ func joinStr(parts []string, sep string) string {
 	return out
 }
 
+// dedupKeyFor builds the identity used to recognise a record the collector has
+// already accounted for.
+//
+// The key deliberately does NOT include the file name: the contract is that one
+// logical call appears once per tool, no matter how many files carry it. That is
+// also why a cached per-file aggregate cannot simply be summed - see
+// MergePartials.
+func dedupKeyFor(r *rawObj, m *Manifest) string {
+	if len(m.Dedup) > 0 {
+		parts := make([]string, 0, len(m.Dedup))
+		any := false
+		for _, p := range m.Dedup {
+			s := str(firstOf(r.Obj, []string{p}))
+			if s != "" {
+				any = true
+			}
+			parts = append(parts, s)
+		}
+		if any {
+			return m.ID + ":" + joinStr(parts, ":")
+		}
+	}
+	// No usable identity field: fall back to position, which is unique by
+	// construction because the file name is part of it.
+	return m.ID + ":" + r.File + "#" + strconv.Itoa(r.Line)
+}
+
+// normalizeAll applies dedup and normalisation to a record stream, in order.
+//
+// emit receives every dedup key the run claimed together with the record it
+// produced, or nil for a record that turned out to carry no usage. That pairing
+// is what a cached per-file aggregate has to keep: the key is the identity that
+// cross-file dedup works on, and the record is the contribution that a later
+// duplicate has to be prevented from double-counting. A cache that stored only
+// one of the two could not be replayed exactly.
+//
+// The whole-tool path and the per-file cache path share this function on
+// purpose: one definition of the dedup rule is what lets a summed cache be
+// provably identical to a full parse.
+func normalizeAll(raw []*rawObj, m *Manifest, ctx *Context, emit func(key string, rec *Record)) []Record {
+	seen := map[string]bool{}
+	var out []Record
+	for _, r := range raw {
+		key := dedupKeyFor(r, m)
+		if seen[key] {
+			ctx.Dropped++
+			continue
+		}
+		seen[key] = true
+		rec := normalize(r, m, ctx)
+		if emit != nil {
+			emit(key, rec)
+		}
+		if rec != nil {
+			out = append(out, *rec)
+		}
+	}
+	return out
+}
+
 // Run executes one manifest and returns its canonical records, delegating to a
 // driver when the manifest declares one.
 func Run(m *Manifest, ctx *Context) []Record {
@@ -190,14 +225,7 @@ func Run(m *Manifest, ctx *Context) []Record {
 		}
 		return nil
 	}
-	seen := map[string]bool{}
-	var out []Record
-	for _, r := range raw {
-		if rec := normalize(r, m, ctx, seen); rec != nil {
-			out = append(out, *rec)
-		}
-	}
-	return out
+	return normalizeAll(raw, m, ctx, nil)
 }
 
 // ReadRecords dispatches on the manifest kind.
@@ -252,82 +280,101 @@ type ToolAgg struct {
 	Files      int                  `json:"_files"`
 }
 
-// Aggregate folds canonical records into the per-tool summary shape.
-func Aggregate(records []Record, m *Manifest) *ToolAgg {
-	totals := blankTokens()
-	byModel := map[string]*ModelAgg{}
-	byDay := map[string]*ModelAgg{}
-	sessions := map[string]bool{}
-	times := []string{}
-	for _, r := range records {
-		sessions[r.Session] = true
-		ma, ok := byModel[r.Model]
-		if !ok {
-			ma = &ModelAgg{}
-			byModel[r.Model] = ma
-		}
-		vals := map[string]int64{
-			"input": r.Input, "cacheRead": r.CacheRead, "cacheWrite": r.CacheWrite,
-			"output": r.Output, "reasoning": r.Reasoning,
-		}
-		for _, k := range TokenKeys {
-			totals[k] += vals[k]
-			switch k {
-			case "input":
-				ma.Input += vals[k]
-			case "cacheRead":
-				ma.CacheRead += vals[k]
-			case "cacheWrite":
-				ma.CacheWrite += vals[k]
-			case "output":
-				ma.Output += vals[k]
-			case "reasoning":
-				ma.Reasoning += vals[k]
-			}
-		}
-		if ts, ok := r.Ts.(string); ok && ts != "" {
-			day := ts
-			if len(day) > 10 {
-				day = day[:10]
-			}
-			da, ok := byDay[day]
-			if !ok {
-				da = &ModelAgg{}
-				byDay[day] = da
-			}
-			for _, k := range TokenKeys {
-				switch k {
-				case "input":
-					da.Input += vals[k]
-				case "cacheRead":
-					da.CacheRead += vals[k]
-				case "cacheWrite":
-					da.CacheWrite += vals[k]
-				case "output":
-					da.Output += vals[k]
-				case "reasoning":
-					da.Reasoning += vals[k]
-				}
-			}
-			times = append(times, ts)
-		}
+// accumulator folds records into the counters a ToolAgg is made of.
+//
+// Aggregate and MergePartials both drive one of these, which is what makes a
+// cache assembled from per-file pieces identical to a full parse: there is one
+// piece of arithmetic, reached two ways, not two implementations that have to be
+// kept in agreement by hand.
+type accumulator struct {
+	totals   map[string]int64
+	byModel  map[string]*ModelAgg
+	byDay    map[string]*ModelAgg
+	sessions map[string]bool
+	times    []string
+	calls    int
+}
+
+func newAccumulator() *accumulator {
+	return &accumulator{
+		totals: blankTokens(), byModel: map[string]*ModelAgg{},
+		byDay: map[string]*ModelAgg{}, sessions: map[string]bool{},
 	}
-	sort.Strings(times)
+}
+
+func (a *accumulator) add(r Record) {
+	a.sessions[r.Session] = true
+	for _, k := range TokenKeys {
+		a.totals[k] += tokenOf(r, k)
+	}
+	addTo(a.byModel, r.Model, r)
+	a.calls++
+	if ts, ok := r.Ts.(string); ok && ts != "" {
+		day := ts
+		if len(day) > 10 {
+			day = day[:10]
+		}
+		addTo(a.byDay, day, r)
+		a.times = append(a.times, ts)
+	}
+}
+
+func tokenOf(r Record, key string) int64 {
+	switch key {
+	case "input":
+		return r.Input
+	case "cacheRead":
+		return r.CacheRead
+	case "cacheWrite":
+		return r.CacheWrite
+	case "output":
+		return r.Output
+	case "reasoning":
+		return r.Reasoning
+	}
+	return 0
+}
+
+func addTo(into map[string]*ModelAgg, key string, r Record) {
+	m, ok := into[key]
+	if !ok {
+		m = &ModelAgg{}
+		into[key] = m
+	}
+	m.Input += r.Input
+	m.CacheRead += r.CacheRead
+	m.CacheWrite += r.CacheWrite
+	m.Output += r.Output
+	m.Reasoning += r.Reasoning
+}
+
+// agg renders the accumulated counters into the per-tool summary shape.
+func (a *accumulator) agg(m *Manifest, files int) *ToolAgg {
+	sort.Strings(a.times)
 	first, last := "", ""
-	if len(times) > 0 {
-		first, last = times[0], times[len(times)-1]
+	if len(a.times) > 0 {
+		first, last = a.times[0], a.times[len(a.times)-1]
 	}
 	label := m.Label
 	if label == "" {
 		label = m.ID
 	}
 	return &ToolAgg{
-		Tool: m.ID, Label: label, Detected: len(records) > 0, Home: m.Home,
-		Sessions: len(sessions), Calls: len(records),
-		Input: totals["input"], CacheRead: totals["cacheRead"],
-		CacheWrite: totals["cacheWrite"], Output: totals["output"],
-		Reasoning: totals["reasoning"],
-		Models:    byModel, Days: byDay,
-		FirstTs: first, LastTs: last, DedupNote: m.Note, Files: m.Files,
+		Tool: m.ID, Label: label, Detected: a.calls > 0, Home: m.Home,
+		Sessions: len(a.sessions), Calls: a.calls,
+		Input: a.totals["input"], CacheRead: a.totals["cacheRead"],
+		CacheWrite: a.totals["cacheWrite"], Output: a.totals["output"],
+		Reasoning: a.totals["reasoning"],
+		Models:    a.byModel, Days: a.byDay,
+		FirstTs: first, LastTs: last, DedupNote: m.Note, Files: files,
 	}
+}
+
+// Aggregate folds canonical records into the per-tool summary shape.
+func Aggregate(records []Record, m *Manifest) *ToolAgg {
+	a := newAccumulator()
+	for _, r := range records {
+		a.add(r)
+	}
+	return a.agg(m, m.Files)
 }
