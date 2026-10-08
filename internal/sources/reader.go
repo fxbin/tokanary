@@ -25,6 +25,12 @@ type Context struct {
 	RawInput int64
 	// PathOverrides lets --paths replace a manifest's paths
 	PathOverrides map[string][]string
+
+	// ForceFull bypasses the per-file aggregate cache. It backs `collect
+	// --full`, whose promise is to re-read sources even when nothing moved; a
+	// cache that ignored the flag would make that promise false, and quietly,
+	// which is worse than not offering it.
+	ForceFull bool
 }
 
 func (c *Context) patternsFor(m *Manifest) []string {

@@ -162,6 +162,7 @@ func runCollect(args []string) int {
 			Home:      o.home,
 			WorkDir:   o.workDir,
 			Prefilter: m.PrefilterPatterns(),
+			ForceFull: o.full,
 		}
 		files := sources.FilesFor(m, ctx)
 		fp := fingerprintFiles(files)
@@ -190,17 +191,25 @@ func runCollect(args []string) int {
 			}
 		}
 
-		records := sources.Run(m, ctx)
-		agg := sources.Aggregate(records, m)
+		agg, parsedFiles := sources.CollectAggregate(m, ctx, files)
+		if parsedFiles >= 0 {
+			// Say how much was actually read. With per-file caching "解析 N 个
+			// 文件" is no longer the whole story: on an unchanged month of
+			// sessions it is a handful, and that is the number worth watching.
+			fmt.Printf("[ok] %s: 重读 %d/%d 个文件（其余命中部分聚合缓存）\n",
+				m.ID, parsedFiles, len(files))
+		}
 		if !agg.Detected {
 			continue
 		}
 		// python prepends a dedup summary to the adapter's own note so the
-		// dashboard can show how many duplicate rows were dropped
+		// dashboard can show how many duplicate rows were dropped.
+		// agg.Calls is the surviving record count - the same number len(records)
+		// used to carry - so the line reads identically either way.
 		note := agg.DedupNote
 		if ctx.Dropped > 0 {
 			note = fmt.Sprintf("按 %v 去重，丢弃重复行 %d 条（原始 %d 行 → %d 次调用）。%s",
-				m.Dedup, ctx.Dropped, len(records)+ctx.Dropped, len(records), note)
+				m.Dedup, ctx.Dropped, agg.Calls+ctx.Dropped, agg.Calls, note)
 		}
 		// home is the directory of the first file read, matching python's
 		// m["_home"] = str(files[0].parent if files else "")

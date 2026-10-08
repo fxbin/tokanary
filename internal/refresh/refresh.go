@@ -20,10 +20,15 @@ import (
 
 // Result reports what Touch did.
 type Result struct {
-	WarehouseRebuilt bool   `json:"warehouseRebuilt"`
-	ToolsParsed      int    `json:"toolsParsed"`
-	ToolsReused      int    `json:"toolsReused"`
-	Note             string `json:"note,omitempty"`
+	WarehouseRebuilt bool `json:"warehouseRebuilt"`
+	ToolsParsed      int  `json:"toolsParsed"`
+	ToolsReused      int  `json:"toolsReused"`
+	// ToolsPartialParsed counts source files actually read for tools that
+	// support per-file partials. It is the honest measure of an incremental
+	// collect: ToolsParsed says how many tools were rebuilt, this says how much
+	// was re-read inside them.
+	ToolsPartialParsed int    `json:"toolsPartialParsed"`
+	Note               string `json:"note,omitempty"`
 }
 
 // Fingerprint is a cheap change detector over a set of files.
@@ -229,9 +234,14 @@ func collectExternal(repoRoot, cache, extPath string, st *state, res *Result) er
 			}
 		}
 
-		records := sources.Run(m, ctx)
-		agg := sources.Aggregate(records, m)
+		// Per-file partials make the cost proportional to what moved rather
+		// than to how much history has accumulated. parsedFiles says how many
+		// sources were actually read, which is the number worth watching.
+		agg, parsedFiles := sources.CollectAggregate(m, ctx, files)
 		res.ToolsParsed++
+		if parsedFiles > 0 {
+			res.ToolsPartialParsed += parsedFiles
+		}
 		if !agg.Detected {
 			continue
 		}
