@@ -240,11 +240,11 @@ tokanary collect                     # 真正采集；路径变量解析不了�
 
 | id | kind | 难点 | 状态 |
 |---|---|---|---|
-| `claude-code` | jsonl | 流式重复行，**58% 是重复**，必须按 `message.id` 去重 | ✅ 本机验证 |
-| `codex` | jsonl + driver | input 含缓存；累计值需差分；模型名跨行 | ✅ 本机验证 |
-| `opencode` | sqlite | reasoning 可加，需并入 output | ✅ 本机验证 |
-| `deepseek-harness` | zstd-jsonl | 官方 home（`~/.dsh` / `$DSH_HOME`）；`inputTokens` 已非缓存（禁 inputSubtract）；信封 `time` 为 Unix ms → ISO；按 `data.message.id` 去重 | ⚠️ 本机无原生数据（0 文件，路径就绪） |
-| `deepseek-harness-wrapper` | zstd-jsonl | 三方包装壳 home（本机 dataelement DSH Desktop → `%APPDATA%\dsh-desktop\harness`）；schema 同官方 | ✅ 本机验证（191 文件 / 2006.7M token） |
+| `claude-code` | jsonl | 流式重复行，**58% 是重复**，必须按 `message.id` 去重 | 本机验证 |
+| `codex` | jsonl + driver | input 含缓存；累计值需差分；模型名跨行 | 本机验证 |
+| `opencode` | sqlite | reasoning 可加，需并入 output | 本机验证 |
+| `deepseek-harness` | zstd-jsonl | 官方 home（`~/.dsh` / `$DSH_HOME`）；`inputTokens` 已非缓存（禁 inputSubtract）；信封 `time` 为 Unix ms → ISO；按 `data.message.id` 去重 | 本机无原生数据（0 文件，路径就绪） |
+| `deepseek-harness-wrapper` | zstd-jsonl | 三方包装壳 home（本机 dataelement DSH Desktop → `%APPDATA%\dsh-desktop\harness`）；schema 同官方 | 本机验证（191 文件 / 2006.7M token） |
 
 > 早期版本还带一个聚合器适配器（`enabled:false`，兜底覆盖 39 个工具）。
 > 它与内置适配器重叠、同时开会重复计数，且其 `input_tokens` 仍含 `cache_creation_input_tokens`，

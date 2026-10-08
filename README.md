@@ -130,10 +130,10 @@ npm run build
 
 | 测试 | 作用 | 状态 |
 |---|---|---|
-| `go test ./...` | 采集 / 聚合 / 路径安全 / 装配 | ✅ |
+| `go test ./...` | 采集 / 聚合 / 路径安全 / 装配 | 通过 |
 | `TestFrozenParity` | 与冻结 fixture 比对口径 | 需 `.cache/frozen/` |
-| `TestAdapterParity` | 外部适配器一致性 | ⚠️ 暂跳过 |
-| `web/npm test` | 定价 / 渲染 / 范围聚合 | ✅（无 fixture 时跳过真实数据用例） |
+| `TestAdapterParity` | 外部适配器一致性 | 暂跳过 |
+| `web/npm test` | 定价 / 渲染 / 范围聚合 | 通过（无 fixture 时跳过真实数据用例） |
 
 ---
 
@@ -152,4 +152,12 @@ npm run build
 | 文档 | 内容 |
 |---|---|
 | [`data/adapters/README.md`](data/adapters/README.md) | 适配器规范、字段映射、口径铁律 |
+| [`DESIGN.md`](DESIGN.md) | 界面设计语言与诚实性约束 |
+| [`AGENTS.md`](AGENTS.md) | 代码库约定与提交门禁 |
 | `tokanary -h` | 全部命令与参数 |
+
+---
+
+## 许可证
+
+[MIT](LICENSE)
