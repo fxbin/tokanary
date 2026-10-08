@@ -46,5 +46,5 @@
       "reasoningTokens"
     ]
   },
-  "note": "对齐 CodeBurn cursor-agent.ts：~/.cursor 下会话存储；protobuf 状态需专用解析（暂 JSONL）。"
+  "note": "~/.cursor 下会话存储；protobuf 状态需专用解析（暂 JSONL）。"
 }

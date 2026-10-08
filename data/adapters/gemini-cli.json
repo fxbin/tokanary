@@ -49,5 +49,5 @@
       "usageMetadata.thoughtsTokenCount"
     ]
   },
-  "note": "对齐 CodeBurn gemini.ts：~/.gemini/tmp/*/chats/session-*.json，messages[].tokens {input,output,cached,thoughts}。"
+  "note": "~/.gemini/tmp/*/chats/session-*.json，messages[].tokens {input,output,cached,thoughts}。"
 }

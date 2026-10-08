@@ -41,5 +41,5 @@
       "usageMetadata.thoughtsTokenCount"
     ]
   },
-  "note": "对齐 CodeBurn qwen.ts：~/.qwen/projects/*/chats/*.jsonl，usageMetadata（Google 风格）。"
+  "note": "~/.qwen/projects/*/chats/*.jsonl，usageMetadata（Google 风格）。"
 }

@@ -26,5 +26,5 @@
     ]
   },
   "caveat": "Windows/Linux 路径见 CodeBurn cursor.ts；bubbleId 含换行的工具行应过滤（driver 阶段）。",
-  "note": "对齐 CodeBurn cursor.ts：state.vscdb cursorDiskKV json_extract tokenCount.*。"
+  "note": "state.vscdb cursorDiskKV json_extract tokenCount.*。"
 }

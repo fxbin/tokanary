@@ -42,5 +42,5 @@
       "usage.cacheWrite"
     ]
   },
-  "note": "对齐 CodeBurn pi.ts OMP 根：~/.omp/agent/sessions。"
+  "note": "~/.omp/agent/sessions。"
 }

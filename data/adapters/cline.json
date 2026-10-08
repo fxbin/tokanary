@@ -42,5 +42,5 @@
       "cacheWrites"
     ]
   },
-  "note": "对齐 CodeBurn cline.ts：~/.cline/data 任务目录。"
+  "note": "~/.cline/data 任务目录。"
 }

@@ -44,5 +44,5 @@
       "usage.cacheWrite"
     ]
   },
-  "note": "对齐 CodeBurn openclaw.ts：message.usage {input,output,cacheRead,cacheWrite}。"
+  "note": "message.usage {input,output,cacheRead,cacheWrite}。"
 }

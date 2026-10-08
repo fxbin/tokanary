@@ -34,5 +34,5 @@
       "reasoning_tokens"
     ]
   },
-  "note": "对齐 CodeBurn zcode.ts：~/.zcode/cli/db/db.sqlite 的 model_usage（v0.14.x 核实过 schema）。GLM 订阅制，成本用 models.dev 单价估算。"
+  "note": "~/.zcode/cli/db/db.sqlite 的 model_usage（v0.14.x 核实过 schema）。GLM 订阅制，成本用 models.dev 单价估算。"
 }

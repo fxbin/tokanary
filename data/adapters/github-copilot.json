@@ -50,5 +50,5 @@
     ]
   },
   "caveat": "CodeBurn 注释：~/.copilot/session-state 只记 output，input/cache 多半缺失，费用会低估；更全的是 agent-traces.db（需 VS Code 开关）。",
-  "note": "对齐 CodeBurn copilot.ts 的 JSONL 回退路径。完整计量需 OTel agent-traces.db（后续可加 sqlite 源）。"
+  "note": "JSONL 回退路径。完整计量需 OTel agent-traces.db（后续可加 sqlite 源）。"
 }

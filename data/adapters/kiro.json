@@ -47,5 +47,5 @@
       "cacheCreationInputTokens"
     ]
   },
-  "note": "对齐 CodeBurn kiro.ts：globalStorage/kiro.kiroagent + workspaceStorage；历史聊天用字符估算 token。"
+  "note": "globalStorage/kiro.kiroagent + workspaceStorage；历史聊天用字符估算 token。"
 }

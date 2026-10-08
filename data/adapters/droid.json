@@ -47,5 +47,5 @@
       "settings.tokenUsage.thinkingTokens"
     ]
   },
-  "note": "对齐 CodeBurn droid.ts：~/.factory，tokenUsage.{input,output,cache*,thinking}Tokens。"
+  "note": "~/.factory，tokenUsage.{input,output,cache*,thinking}Tokens。"
 }
