@@ -190,9 +190,24 @@ func AssembleFromUsage(opt Options, usage *warehouse.Usage, cliStats map[string]
 
 	// Live desktop path: describe the warehouse + adapters, not a single pi
 	// sqlite. refresh/build pass a richer Meta that records the real source.
+	//
+	// 体积与 schema 版本以前在这里硬传 0，可同一行下面生成的标签却写着
+	// 「本地仓库（0.3 MB）」—— 同一个 meta 块里两个数字自相矛盾，而结构化字段
+	// 才是任何读 payload 的人真正会取的那个。BuildMeta 已经会 stat 换算，
+	// 这里把值传下去就行。
 	warehouseLabel := filepath.Join(".cache", "tokanary.sqlite")
-	if st, err := os.Stat(filepath.Join(root, DefaultDBPath)); err == nil {
-		warehouseLabel = fmt.Sprintf("本地仓库（%.1f MB）", float64(st.Size())/1048576)
+	dbPath := filepath.Join(root, DefaultDBPath)
+	var dbSize, walSize int64
+	if st, err := os.Stat(dbPath); err == nil {
+		dbSize = st.Size()
+		warehouseLabel = fmt.Sprintf("本地仓库（%.1f MB）", float64(dbSize)/1048576)
+	}
+	if st, err := os.Stat(dbPath + "-wal"); err == nil {
+		walSize = st.Size()
+	}
+	var dbVersion int64
+	if usage.DBVersion.Valid {
+		dbVersion = usage.DBVersion.Int64
 	}
 	nTools := 0
 	if external != nil && len(external.Tools) > 0 {
@@ -205,7 +220,7 @@ func AssembleFromUsage(opt Options, usage *warehouse.Usage, cliStats map[string]
 
 	meta := pricing.BuildMeta(
 		time.Now().Format("2006-01-02T15:04:05-07:00"),
-		warehouseLabel, sourceLabel, sourceLabel, 0, 0, 0,
+		warehouseLabel, sourceLabel, sourceLabel, dbVersion, dbSize, walSize,
 		firstTs, lastTs, cli, home)
 	if opt.Meta != nil {
 		meta = *opt.Meta
