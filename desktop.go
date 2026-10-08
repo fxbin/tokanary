@@ -73,13 +73,12 @@ func (s *APIService) serveDashboard(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	// Read-time incremental refresh: pick up new agent log lines without a
-	// full `tokanary refresh`. Cheap when nothing changed (mtime fingerprints).
-	if _, err := refresh.Touch(s.repoRoot); err != nil {
-		// Still serve whatever the warehouse has — a transient collect error
-		// must not blank the dashboard.
-		fmt.Fprintf(os.Stderr, "[warn] live refresh: %v\n", err)
-	}
+	// Read-time refresh: pick up new agent log lines without a full
+	// `tokanary refresh`. Kickoff returns immediately - the page is rendered
+	// from the warehouse as it stands and the re-parse happens behind it.
+	// Touching inline cost 35s per request and, with several requests in
+	// flight, 10.5 GB and a crash.
+	refresh.Kickoff(s.repoRoot)
 	aiOn := r.URL.Query().Get("ai") == "1"
 	payload, err := dashboard.Assemble(dashboard.Options{RepoRoot: s.repoRoot, AIEnable: aiOn})
 	if err != nil {
