@@ -106,7 +106,9 @@ suite('全部分块：冒烟与契约', () => {
   it('缺 data 时给出生效提示而非抛错', () => {
     const html = renderOverview(null, st, cmp, 'all')
     expect(html).toContain('tokanary refresh')
-    expect(html).not.toContain('build_data.py')
+    // 提示只能指向还存在的产物。断言某个已退场的文件名等于永远通过，
+    // 所以断言这一类：任何生成器内部痕迹都不该出现在用户界面里。
+    expect(html).not.toMatch(/\.py\b|data\.js/)
   })
 
   it('缺 gateway 段时降级到 models.dev 而非抛错', () => {

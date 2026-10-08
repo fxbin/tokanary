@@ -181,7 +181,7 @@ describe('U2 hours heatmap', () => {
     expect(Number.isNaN(empty.avgBurn)).toBe(false)
   })
 
-  itLive('真实 data.js: hours 求和 ≈ days(total);总览含 heatmap+洞察', () => {
+  itLive('真实数据: hours 求和 ≈ days(total);总览含 heatmap+洞察', () => {
     if (Array.isArray(DATA.hours) && DATA.hours.length) {
       const hs = DATA.hours.reduce((t: number, x: any) => t + (x.total || 0), 0)
       const ds = (DATA.days || []).reduce((t: number, x: any) => t + (x.total || 0), 0)
@@ -266,7 +266,7 @@ describe('U3 models tab', () => {
     // row-miss is driven by a missing PRICE, not by missing usage records -
     // the old assertion here conflated the two and only passed while some
     // model happened to be unpriced. Build the case explicitly instead of
-    // depending on whatever the current data.js happens to contain.
+    // depending on whatever the current fixture happens to contain.
     const bare: any = JSON.parse(JSON.stringify(DATA))
     bare.pricing = {}
     bare.gateway = null
@@ -438,7 +438,7 @@ describe('U4 settings tab + budget', () => {
     expect(html).not.toMatch(/NaN/)
   })
 
-  itLive('data.js 含 sessionsAll(增量契约,U4 钻取依赖)', () => {
+  itLive('真实数据含 sessionsAll(增量契约,U4 钻取依赖)', () => {
     expect(Array.isArray(DATA.sessionsAll)).toBe(true)
     expect(DATA.sessionsAll.length).toBeGreaterThanOrEqual((DATA.sessions || []).length)
   })
@@ -534,7 +534,7 @@ describe('U6 streak', () => {
     expect(calcStreak([{ d: '2026-09-01', total: 0 }], '2026-09-01').streak).toBe(0)
   })
 
-  itLive('真实 data.js: streak ≥1(有活跃日)且 endDate 非空', () => {
+  itLive('真实数据: streak ≥1(有活跃日)且 endDate 非空', () => {
     const piLast = ((DATA.days || []) as any[]).map((d: any) => d.d).filter(Boolean).sort().pop()
     const s = calcStreak(DATA.days || [], piLast)
     expect(s.streak).toBeGreaterThanOrEqual(1)

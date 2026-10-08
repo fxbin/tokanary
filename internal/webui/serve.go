@@ -137,8 +137,8 @@ func HasIndex(root string) bool {
 // somewhere other than the server root. That failure is invisible until a
 // browser is opened, which is why it is asserted here instead.
 //
-// This replaces web/scripts/check-dist-paths.cjs, which nothing invoked once
-// refresh.cmd was replaced by the Go pipeline.
+// Nothing invokes a separate dist path checker any more; this assertion is
+// where that check lives now.
 func VerifyDist(root string) error {
 	index := filepath.Join(root, "index.html")
 	raw, err := os.ReadFile(index)

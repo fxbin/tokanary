@@ -11,22 +11,22 @@ import (
 )
 
 // TestFrozenParity builds the warehouse from the frozen fixture and compares
-// every field against the data.js that the python pipeline produced from the
-// same fixture.
+// every field against the reference payload the retired Python pipeline produced
+// from the same fixture. That reference is what makes this a parity gate rather
+// than a snapshot test, and it cannot be regenerated from this repository: the
+// collector that wrote it is gone, so the fixture has to come from a machine
+// that still has it.
 //
 // The fixture lives in .cache/ and is not committed (it contains this machine's
 // paths, project names and session titles), so the test skips when it is
-// absent. Regenerate both sides with:
+// absent. With both halves in place:
 //
-//	python .cache/freeze_fixture.py %USERPROFILE%\.pi-desktop .cache/frozen
-//	python core/build_data.py --pi-dir .cache/frozen --out .cache/frozen-data.js
-//	    --pi-cli-dir .cache/frozen\cli
 //	go test ./internal/warehouse -run Frozen
 func TestFrozenParity(t *testing.T) {
 	root := repoRoot(t)
 	fixture := filepath.Join(root, ".cache", "frozen")
 	if _, err := os.Stat(filepath.Join(fixture, "pi.sqlite")); err != nil {
-		t.Skip("frozen fixture absent; see the regenerate commands in this test")
+		t.Skip("frozen fixture absent; this gate needs the reference payload from the retired Python pipeline")
 	}
 
 	work := t.TempDir()

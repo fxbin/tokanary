@@ -765,7 +765,7 @@ func LoadDashboardPayload(path string) (map[string]any, error) {
 	body := string(raw)
 	i := strings.Index(body, "=")
 	if i < 0 {
-		return nil, fmt.Errorf("%s: 涓嶆槸 data.js 鏍煎紡", path)
+		return nil, fmt.Errorf("%s: 不是 data.js 格式", path)
 	}
 	body = strings.TrimSpace(body[i+1:])
 	body = strings.TrimSuffix(body, ";")

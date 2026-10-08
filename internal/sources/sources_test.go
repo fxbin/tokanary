@@ -19,14 +19,13 @@ import (
 // not adapter correctness. Hence the guard: the test runs only when USERPROFILE
 // points inside a frozen home.
 //
-// NOTE: this gate is currently unreachable. It was driven by
-// .cache/run_g3_parity.ps1, which built a synthetic home of frozen sources and
-// pointed USERPROFILE/APPDATA at it for both collectors. That script called
-// `python core/collect_sources.py` and was removed with the Python pipeline, and
-// the frozen home it produced went with it. Nothing rewrites the driver in Go
-// yet, so this test always skips. It is kept because the comparison logic is
-// correct and worth re-enabling; wiring a hermetic frozen home up in Go is the
-// missing piece.
+// NOTE: this gate is currently unreachable. It used to be driven by a
+// PowerShell harness that built a synthetic home of frozen sources and pointed
+// USERPROFILE/APPDATA at it for both collectors. That harness shelled out to the
+// Python collector and went with it, along with the frozen home it produced.
+// Nothing rewrites the driver in Go yet, so this test always skips. It is kept
+// because the comparison logic is correct and worth re-enabling; wiring a
+// hermetic frozen home up in Go is the missing piece.
 //
 // The long-lived replacement for "did the Go port keep python's numbers" is
 // TestFrozenParity in internal/warehouse, which compares against a frozen sqlite
