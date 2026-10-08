@@ -224,6 +224,13 @@ footer.foot { max-width: 1360px; margin: 8px auto 0; color: var(--dim); font-siz
   background: color-mix(in srgb, var(--err) 10%, var(--card));
   border-color: color-mix(in srgb, var(--err) 45%, var(--line));
 }
+/* 95% 单独一档：旧稿它和 80% 共用 err，界面上分辨不出来。
+   更深一档底色、更重的左边框，色相不变（仍属 err），不新增颜色 token。 */
+.budget-err2 {
+  background: color-mix(in srgb, var(--err) 16%, var(--card));
+  border-color: color-mix(in srgb, var(--err) 75%, var(--line));
+  border-left-width: 3px;
+}
 #budget-usd {
   width: 110px; padding: 5px 8px; font: inherit; font-size: 13px;
   color: var(--fg); background: var(--wash-2);

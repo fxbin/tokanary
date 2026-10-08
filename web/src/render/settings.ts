@@ -1,46 +1,62 @@
 import {
   fmt, money, pct, CATS, POLICIES, SOURCES,
   normalizeCost, costOfTokens, computeAll, compareSources,
-  dailyCost, externalSummary, rangeStats, rangeExt, rangeAnchor,
+  dailyCost, externalSummary, rangeStats, rangeExt, rangeAnchor, mergeDailyCost, monthToDateCost,
   filterHoursByRange, hourMatrix, rangeInsights, RANGES,
   filterDaysByRange, rangeCutoffKey, calcStreak, weekTopModels,
   type PricingOpts, type PriceSource, type RangeKey
 } from '../pricing'
 import { MODEL_COLORS, stackBar, donut, legend, dayChart, heatmap, trimNum } from '../charts'
 import { th, sourceTag, stableColorIndex, sesRecency, pad2, localDay, esc, type UiState } from './shared'
-import { budgetAlertHtml } from './projects'
+import { budgetAlertHtml, BUDGET_TIERS } from './projects'
 
 export function renderSettings(data: any, st: UiState, cmp: Record<string, number>, _range: RangeKey, ioText: string, ioError = ''): string {
   if (!data) {
     return '<div class="empty">没有用量数据 —— 请先运行 <code>tokanary refresh</code> 重建仓库。</div>'
   }
   const s = computeAll(data, st)
-  const costByDay = dailyCost(data, s)
-  const rs = rangeStats(data, s, costByDay, _range)
+  const piByDay = dailyCost(data, s)
+  const ext = externalSummary(data, st.policy)
+  // 预算必须比全工具费用：顶栏与跨工具总览报的都是全工具数，拿纯 pi 侧费用去
+  // 和它对照，等于让预算对不上用户真正在意的花钱量（pi 一停更就永远显示 0%）。
+  const costByDay = mergeDailyCost(piByDay, ext, data)
+  const rs = rangeStats(data, s, piByDay, _range)
+  const mtd = monthToDateCost(costByDay)
   const html: string[] = []
-  const rangeLabel = (RANGES[_range] || RANGES.all).label
 
-  /* 预算告警设置 */
-  const ba = budgetAlertHtml(rs.cost, st.budgetUsd)
+  /* 预算告警设置。分子是本月至今、分母是月预算，都与顶栏的范围切换无关 ——
+     旧稿拿「当前范围费用」除月预算，切一次范围结论就翻转一次。 */
+  const ba = budgetAlertHtml(mtd, st.budgetUsd)
   html.push('<section class="card">')
-  html.push('<h2>预算告警 <span class="hint">按当前范围（' + esc(rangeLabel) + '）费用对比月预算 · 0 = 关闭</span></h2>')
+  html.push('<h2>预算告警 <span class="hint">本月至今（全工具）费用对比月预算 · 不随上方范围切换 · 0 = 关闭</span></h2>')
   html.push('<div class="settings">')
   html.push('<div class="set-row"><span>月预算（USD）：</span>' +
     '<input id="budget-usd" type="number" min="0" step="1" value="' + (st.budgetUsd > 0 ? st.budgetUsd : '') + '">' +
     '<span class="dim small">' + (st.budgetUsd > 0
-      ? rangeLabel + '费用 ' + money(rs.cost) + ' · 占预算 ' + pct(rs.cost / st.budgetUsd * 100)
-      : '未启用。填入正数后总览与本页顶部会显示 50% / 80% / 95% 分级提示。') + '</span></div>')
+      ? '本月至今 ' + money(mtd) + ' · 占预算 ' + pct(mtd / st.budgetUsd * 100)
+      : '未启用。填入正数后，本页与总览会在 ' + BUDGET_TIERS.join('%、') + '% 三处换上不同深浅的提示色。') + '</span></div>')
   if (ba) html.push(ba)
   else if (st.budgetUsd > 0) {
-    html.push('<div class="note budget-ok"><b>预算进度</b>：' + rangeLabel + ' <b>' + money(rs.cost) +
-      '</b> / <b>' + money(st.budgetUsd) + '</b>（' + pct(rs.cost / st.budgetUsd * 100) + '）· 安全</div>')
+    html.push('<div class="note budget-ok"><b>预算进度</b>：本月至今 <b>' + money(mtd) +
+      '</b> / <b>' + money(st.budgetUsd) + '</b>（' + pct(mtd / st.budgetUsd * 100) + '）· 安全</div>')
   }
   html.push('</div></section>')
 
   /* 价格设置：单价只走 models.dev（AGENTS.md：无网关价源，无自定义源） */
-  const policyMatters = s.rows.some(function (r: any) {
+  // 这个设置的作用域是全工具费用，不是只有 pi：外部侧走 externalSummary(data, policy)
+  // 也是吃 policy 的，而外部侧占了绝大部分 token。旧稿只扫 s.rows（computeAll 只映射
+  // data.models，即 pi 侧），于是在外部模型缺缓存写单价时那句「切换此项不影响金额」
+  // 是假的 —— 会骗人的安抚句比没有这句更糟。
+  const piNeedsPolicy = s.rows.some(function (r: any) {
     return r.m.cacheWrite > 0 && (r.price.estimatedFields || []).indexOf('cache_write') >= 0
   })
+  const extNeedsPolicy = ((ext && ext.rows) || []).some(function (r: any) {
+    return (r.models || []).some(function (m: any) {
+      return (m.tok && m.tok.cacheWrite || 0) > 0 &&
+        (m.estimatedFields || []).indexOf('cache_write') >= 0
+    })
+  })
+  const policyMatters = piNeedsPolicy || extNeedsPolicy
   const ovCount = Object.keys(st.overrides || {}).length
   // 「单价来源」与「价格来源」说的是同一件事：单价只有一个源，拆成两行等于让用户
   // 把 models.dev 读两遍，第二行还多一个标签位。合成一行，按「源 → 金额 → 抓取时间

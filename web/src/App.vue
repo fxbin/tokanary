@@ -49,11 +49,9 @@
         <div v-else-if="tab === 'sessions'" v-html="sessionsHtml"></div>
         <div v-else-if="tab === 'projects'" v-html="projectsHtml"></div>
         <div v-else-if="tab === 'settings'" v-html="settingsHtml"></div>
-        <div v-else class="card">
-          <h2>{{ tabTitle }} <span class="hint">该视图在 {{ tabOwner }} 建设中，当前为占位</span></h2>
-          <p class="dim">{{ tabNote }}</p>
-          <p><a href="#/overview?range=7d">← 回总览</a></p>
-        </div>
+        <!-- 没有兜底分支：useHashRoute.readHash 只接受 TABS 里列出的 key，
+             tab 的类型又是这五个的联合，所以「不在上面任何一个」到不了这里。
+             旧稿在这里留了一张写着「当前为占位」的卡片，是一句永远说不出口的实话。 -->
       </div>
     </div>
   </div>
@@ -62,7 +60,7 @@
 <script setup lang="ts">
 import { computed, reactive, onMounted, onUnmounted, nextTick } from 'vue'
 import {
-  compareSources, defaultOpts, RANGES, POLICIES, type Policy
+  compareSources, defaultOpts, RANGES, POLICIES, freshnessChip, type Policy
 } from './pricing'
 import {
   renderOverview, renderModels, renderSessions, renderProjects, renderSettings,
@@ -73,12 +71,16 @@ import { useHashRoute, type TabKey } from './composables/useHashRoute'
 import { useDashboard } from './composables/useDashboard'
 import { usePriceIo } from './composables/usePriceIo'
 
+// note 是这一页自带的说明，写之前先对一遍真实渲染出来的区块名。旧稿这几条
+// 是在功能还没做完时写的，改了功能忘了改文案，于是「设置」还写着早已砍掉的
+// 套餐限额、总览还指着已经不叫 cost-hero 的读数条。页面上写着不存在的东西，
+// 比不写更费劲 —— 用户会去找那个东西。
 const TABS = [
-  { k: 'overview', label: '总览', owner: 'U1/U2', note: 'cost-hero、花费趋势、热力图与洞察行已就绪；跨工具总览随范围联动。' },
-  { k: 'models', label: '模型', owner: 'U3', note: '范围内堆叠条、稳定色 donut 与明细改价表（点表头排序，改价写 localStorage）。' },
-  { k: 'sessions', label: '会话', owner: 'U3', note: '可搜索/排序会话表；burn = 活跃天均摊 token 与费用；recency 相对时间。' },
-  { k: 'projects', label: '项目', owner: 'U4', note: '项目归因条 + 点击钻取（该项目模型构成 / 日趋势 / git 产出 / 会话列表）。' },
-  { k: 'settings', label: '设置', owner: 'U4', note: '预算告警 / 套餐限额 / 口径策略 / 手动改价导入导出；页内每 30 秒静默重读仓库。' }
+  { k: 'overview', label: '总览', note: 'KPI 读数条、花费趋势、热力图与洞察行；跨工具总览随范围联动。' },
+  { k: 'models', label: '模型', note: '范围内堆叠条、稳定色 donut 与明细改价表（点表头排序，改价写 localStorage）。' },
+  { k: 'sessions', label: '会话', note: '可搜索/排序会话表；burn = 活跃天均摊 token 与费用；recency 相对时间。' },
+  { k: 'projects', label: '项目', note: '项目归因条 + 点击钻取（该项目模型构成 / 日趋势 / git 产出 / 会话列表）。' },
+  { k: 'settings', label: '设置', note: '预算告警（本月至今比月预算）/ 缺价策略 / 手动改价导入导出；读仓库时顺带在后台补采，跑 tokanary refresh 更快。' }
 ] as const
 
 const st = reactive<UiState>(defaultUiState())
@@ -231,38 +233,47 @@ const tabTitle = computed(() => {
   const t = (TABS as readonly { k: string; label: string }[]).find((x) => x.k === tab.value)
   return t ? t.label : ''
 })
-const tabOwner = computed(() => {
-  const t = (TABS as readonly { k: string; owner: string }[]).find((x) => x.k === tab.value)
-  return t ? t.owner : ''
-})
 const tabNote = computed(() => {
   const t = (TABS as readonly { k: string; note: string }[]).find((x) => x.k === tab.value)
   return t ? t.note : ''
 })
 
-const fresh = computed(() => {
-  const m = (dataRef.value || {}).meta
-  if (!m || !m.generatedAt) return { text: '数据时间未知', cls: 'fresh-err' }
-  const ts = new Date(m.generatedAt).getTime()
-  if (isNaN(ts)) return { text: '数据时间未知', cls: 'fresh-err' }
-  const mins = Math.max(0, Math.round((Date.now() - ts) / 60000))
-  const text = mins < 1 ? '刚刚刷新' :
-    mins < 60 ? mins + ' 分钟前刷新' :
-      mins < 1440 ? Math.floor(mins / 60) + ' 小时前刷新' :
-        Math.floor(mins / 1440) + ' 天前刷新（数据可能已过期）'
-  return { text, cls: mins < 180 ? 'fresh-ok' : mins < 1440 ? 'fresh-warn' : 'fresh-err' }
-})
+// 数据新鲜度的时间基准是「采集时刻」，不是「读库时刻」—— 旧稿用 meta.generatedAt
+// （dashboard.go 里是 time.Now()，每 30 秒轮询都重写）算相对时间，于是永远显示
+// 「刚刚刷新」，而实测 8 个外部工具里有 4 个停更数周。取数、陈旧判定与分级都在
+// range.ts 的 freshnessChip，那里可测；这里只做壳绑定。
+const fresh = computed(() => freshnessChip(dataRef.value))
 const freshText = computed(() => fresh.value.text)
 const freshClass = computed(() => fresh.value.cls)
 // 新鲜度只在这一处说：chip 上是相对时间，绝对时刻放进它的 title（悬停可见）。
 // 旧稿另外在标题下写「更新于 …」、侧栏写「数据 2025-12-27 ~ 2026-10-07」，同一件事说了三遍。
 const freshTitle = computed(() => {
-  const m = (dataRef.value || {}).meta
-  const abs = m && m.generatedAt ? String(m.generatedAt).replace('T', ' ').slice(0, 16) : ''
-  const range = (m && m.rangeStart && m.rangeEnd)
+  const d = dataRef.value || {}
+  const m = d.meta || {}
+  const ext = d.external || {}
+  // 文案说「采集于」，取值就必须真是采集时刻 —— 旧稿这里写「采集于」却读
+  // meta.generatedAt（读库时刻），两个词对不上就是在骗人。
+  const stamp = ext.generatedAt || m.generatedAt
+  const abs = stamp ? String(stamp).replace('T', ' ').slice(0, 16) : ''
+  const range = (m.rangeStart && m.rangeEnd)
     ? '数据区间 ' + String(m.rangeStart).slice(0, 10) + ' ~ ' + String(m.rangeEnd).slice(0, 10) + '。'
     : ''
-  return (abs ? '采集于 ' + abs + '。' : '') + range +
+  const stale = fresh.value.stale
+  const nTools = (ext.tools || []).length
+  const staleLine = stale.length
+    ? (nTools ? '其中 ' : '') + stale.join('、') + ' 的日志超过 7 天没更新，这些工具的费用可能已停更。'
+    : ''
+  // pi 与外部工具各自停在不同日子，只报一个数字会把两者差掩盖掉
+  const piEnd = String(m.rangeEnd || '').slice(0, 10)
+  let extEnd = ''
+  for (const t of (ext.tools || [])) {
+    const day = String((t && t.lastTs) || '').slice(0, 10)
+    if (day > extEnd) extEnd = day
+  }
+  const piLine = (piEnd && extEnd && piEnd < extEnd)
+    ? 'pi 侧数据到 ' + piEnd + '，比外部工具旧。'
+    : ''
+  return (abs ? '采集于 ' + abs + '。' : '') + range + staleLine + piLine +
     '数据来自本地 SQLite 仓库。运行 tokanary refresh 采集后，点「重新读取」或等待自动刷新。'
 })
 // 侧栏只留来源名；区间与时间都在顶栏 chip 的 title 里。
