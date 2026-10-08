@@ -12,14 +12,16 @@ import (
 	"github.com/fxbin/tokanary/internal/webui"
 )
 
-// runRefresh is the Go replacement for refresh.cmd: collect, then extract, then
-// run the frontend tests and build. The .cmd version had to be ASCII-only and
-// free of < > in REM lines because cmd.exe applies redirection at parse time,
-// and it re-used a cached binary so source edits silently had no effect. Both
-// hazards are gone here.
+// runRefresh drives the whole pipeline: collect, then extract, then run the
+// frontend tests and build. It is a Go program rather than a shell script on
+// purpose. The entry points it replaced had to be ASCII-only and free of < > in
+// REM lines because cmd.exe applies redirection at parse time, and they re-used
+// a cached binary so source edits silently had no effect. Both hazards are gone
+// here.
 //
 // Node is still required for the frontend test/build step, but not for serving
-// the dashboard - see `tokanary serve`.
+// the dashboard - that is the Wails window in desktop.go, which reads the
+// warehouse through /api/dashboard.
 func runRefresh(args []string) int {
 	repoRoot := findRepoRoot()
 	if repoRoot == "" {
@@ -166,9 +168,9 @@ const (
 	scheduleLegacy   = "TokenTraker Refresh" // pre-rename task; drop it to avoid double refresh
 )
 
-// runSchedule is the Go replacement for install-schedule.cmd. Windows keeps
-// using schtasks; elsewhere it prints the equivalent cron entry rather than
-// pretending to have registered anything.
+// runSchedule registers the periodic refresh. Windows keeps using schtasks;
+// elsewhere it prints the equivalent cron entry rather than pretending to have
+// registered anything.
 func runSchedule(args []string) int {
 	remove := false
 	minutes := 60
@@ -220,10 +222,25 @@ func runSchedule(args []string) int {
 		return 0
 	}
 
+	// Registering is the one branch that must not run from a throwaway binary.
+	// `go run ./cmd/tokanary schedule` executes out of the build cache, so the
+	// task would point at a path the toolchain is free to delete at the next
+	// `go clean -cache` - and it would fail silently, at a minute of the user's
+	// choosing, with nothing in the repo to explain it.
+	if why, ephemeral := ephemeralBinary(exe); ephemeral {
+		fmt.Fprintf(os.Stderr,
+			"[error] 拒绝注册：当前这个可执行文件是临时的（%s）。\n"+
+				"        计划任务会记住这个路径，一旦被清理就只剩一个静默失败的条目。\n"+
+				"        请先装一个稳定位置的二进制再注册，例如：\n"+
+				"          go build -o tokanary.exe ./cmd/tokanary\n"+
+				"          .\\tokanary.exe schedule %d\n", why, minutes)
+		return 1
+	}
+
 	fmt.Printf("Registering scheduled task %q - every %d minute(s) ...\n", scheduleTaskName, minutes)
 	fmt.Printf("  runs: %s refresh --quiet\n", exe)
-	// The .cmd version shelled out to a second .cmd (refresh-silent.cmd) to get
-	// a quiet, non-interactive run. A flag on the same binary does that here.
+	// A quiet, non-interactive run is just a flag on this binary; the shell
+	// entry points it replaced needed a second script to get one.
 	cmd := exec.Command(schtasks, "/Create", "/TN", scheduleTaskName,
 		"/TR", self+" refresh --no-web --quiet",
 		"/SC", "MINUTE", "/MO", strconv.Itoa(minutes), "/F")
@@ -261,4 +278,67 @@ func scheduleNonWindows(self string, minutes int, remove, show bool) int {
 
 func shellQuote(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
+}
+
+// ephemeralBinary reports whether exe lives somewhere the toolchain is free to
+// delete, and names the place when it does.
+//
+// It exists because `tokanary schedule` records os.Executable(). Under `go run`
+// that is a build-cache artefact with a name derived from the package contents,
+// so the registered task keeps pointing at a file the next `go clean -cache`
+// removes. Nothing about that failure is legible later: the task entry looks
+// registered, the dashboard quietly stops updating, and the repo has no record
+// of why.
+func ephemeralBinary(exe string) (string, bool) {
+	abs, err := filepath.Abs(exe)
+	if err != nil {
+		abs = exe
+	}
+	type root struct{ dir, why string }
+	var roots []root
+	if cache, err := os.UserCacheDir(); err == nil && cache != "" {
+		roots = append(roots, root{filepath.Join(cache, "go-build"), "Go 构建缓存（go run 的产物）"})
+	}
+	if cache := os.Getenv("GOCACHE"); cache != "" {
+		roots = append(roots, root{cache, "GOCACHE"})
+	}
+	if tmp := os.TempDir(); tmp != "" {
+		roots = append(roots, root{tmp, "临时目录"})
+	}
+	if goroot := runtime.GOROOT(); goroot != "" {
+		roots = append(roots, root{goroot, "GOROOT"})
+	}
+	for _, r := range roots {
+		if withinDir(abs, r.dir) {
+			return r.why, true
+		}
+	}
+	return "", false
+}
+
+// withinDir reports whether path sits inside dir.
+//
+// Case is folded only where the filesystem ignores it. On Windows the case of
+// a drive letter or a directory component is not stable across the APIs that
+// produce these strings, so comparing raw would miss real matches. Elsewhere
+// folding would invent them: on a case-sensitive filesystem /opt/Foo is not
+// inside /opt/foo, and a build cache that happens to differ only by case would
+// slip past the check this exists to perform.
+func withinDir(path, dir string) bool {
+	norm := func(s string) string {
+		s = filepath.Clean(s)
+		if runtime.GOOS == "windows" {
+			s = strings.ToLower(s)
+		}
+		return s
+	}
+	p, d := norm(path), norm(dir)
+	if p == d {
+		return true
+	}
+	rel, err := filepath.Rel(d, p)
+	if err != nil {
+		return false
+	}
+	return rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
