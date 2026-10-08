@@ -1,6 +1,7 @@
 package warehouse_test
 
 import (
+	"database/sql"
 	"os"
 	"path/filepath"
 	"testing"
@@ -9,6 +10,69 @@ import (
 	"github.com/fxbin/tokanary/internal/pidata"
 	"github.com/fxbin/tokanary/internal/warehouse"
 )
+
+// TestProjectPathsSurviveTheRoundTrip pins the mapping the git panel depends on.
+// Both ingest paths have to land a usable directory: pi supplies it from
+// projects.path, and for the CLI the project id already IS the cwd.
+//
+// Built from a constructed Data rather than the frozen fixture, because a
+// fixture-gated test only runs where the retired Python pipeline survives - and
+// the extraction this guards was invisible for exactly that long.
+func TestProjectPathsSurviveTheRoundTrip(t *testing.T) {
+	work := t.TempDir()
+	piPath := filepath.Join("D:", "Project", "XiaoIce", "ClipInjector")
+	cliPath := filepath.Join("D:", "Project", "GitHub", "opencode-src")
+	data := &pidata.Data{
+		Projects:   []pidata.ProjectRow{{ID: 1, Name: "ClipInjector", Path: piPath}},
+		RoleCounts: map[string][2]int64{},
+		ToolCounts: map[string][2]int64{},
+	}
+	cli := &clisession.Result{Projects: []string{cliPath}}
+
+	db, err := warehouse.DB(filepath.Join(work, "w.sqlite"), data, cli)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	usage, err := warehouse.ExportUsage(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := usage.ProjectPaths["ClipInjector"]; got != piPath {
+		t.Errorf("pi project path = %q, want %q", got, piPath)
+	}
+	// A CLI row is keyed by cwd, so its name is the base and its path is the
+	// id. Before this it landed with no path and the panel could not see it.
+	if got := usage.ProjectPaths[filepath.Base(cliPath)]; got != cliPath {
+		t.Errorf("cli project path = %q, want %q", got, cliPath)
+	}
+	if len(usage.ProjectPaths) != 2 {
+		t.Errorf("want 2 paths, got %v", usage.ProjectPaths)
+	}
+}
+
+// TestProjectPathReachesTheWarehouseColumn isolates the schema: a path in the
+// Data has to be readable straight out of the table, not only via ExportUsage.
+func TestProjectPathReachesTheWarehouseColumn(t *testing.T) {
+	work := t.TempDir()
+	want := filepath.Join("D:", "repo", "demo")
+	db, err := warehouse.DB(filepath.Join(work, "w.sqlite"), &pidata.Data{
+		Projects:   []pidata.ProjectRow{{ID: 9, Name: "demo", Path: want}},
+		RoleCounts: map[string][2]int64{},
+		ToolCounts: map[string][2]int64{},
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	var got sql.NullString
+	if err := db.QueryRow(`SELECT path FROM projects WHERE name = 'demo'`).Scan(&got); err != nil {
+		t.Fatal(err)
+	}
+	if got.String != want {
+		t.Fatalf("projects.path = %q, want %q", got.String, want)
+	}
+}
 
 // TestFrozenParity builds the warehouse from the frozen fixture and compares
 // every field against the reference payload the retired Python pipeline produced

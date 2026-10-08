@@ -42,9 +42,15 @@ CREATE TABLE IF NOT EXISTS sessions(
 -- id is TEXT, not INTEGER: the sqlite source uses integer project ids while the
 -- CLI ingest keys projects by cwd (a path string), and both land in this one
 -- table. python declared this VARCHAR for the same reason.
+--
+-- path is the project's working directory, which the git panel needs to read
+-- commit activity. The sqlite source supplies it from projects.path; the CLI
+-- ingest already has it, since there the id IS the cwd. Kept in the warehouse
+-- so the read path can answer without reopening pi.sqlite.
 CREATE TABLE IF NOT EXISTS projects(
     id   TEXT PRIMARY KEY,
-    name TEXT
+    name TEXT,
+    path TEXT
 );
 -- messages stay aggregated: 144k detail rows would be 100x the turns table and
 -- DuckDB/SQLite executemany over them is pathologically slow.

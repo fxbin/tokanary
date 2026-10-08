@@ -238,9 +238,17 @@ type TurnRow struct {
 }
 
 // ProjectRow is one warehouse projects row.
+//
+// Path is the working directory pi recorded for the project. It is the only
+// reliable project-to-directory mapping the pipeline has: it comes from the
+// same source as every other number on the dashboard, and it is present on
+// every platform. The third-party agent databases yield used to consult are
+// optional installs that are usually absent, which left the git panel empty
+// even where the path was sitting right here.
 type ProjectRow struct {
 	ID   int64
 	Name string
+	Path string
 }
 
 // Data is the fully normalised source, ready to write into the warehouse.
@@ -286,6 +294,7 @@ func Read(snapPath, srcPath string) (*Data, error) {
 			return nil, err
 		}
 		p.Name = name.String
+		p.Path = path.String
 		projects[p.ID] = p.Name
 		d.Projects = append(d.Projects, p)
 	}

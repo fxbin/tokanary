@@ -129,6 +129,17 @@ var cachedRootsAt time.Time
 
 // DiscoverRoots walks well-known local agent DBs for workspace paths that are
 // git repos (ZCode session.directory, mimocode session.directory).
+//
+// This is a SUPPLEMENT, not the source. Those databases belong to optional
+// third-party agents that are usually not installed, so on a typical machine
+// this returns nothing and the panel stayed empty - even though pi records the
+// working directory of every project in its own schema. Callers must prefer
+// their own project-to-path mapping and use this only to fill gaps; on a machine
+// with neither agent installed, an empty result is the normal case, not a
+// failure.
+//
+// Errors are intentionally not reported: "that optional database is not there"
+// is the common case and has nothing actionable in it.
 func DiscoverRoots(home string) map[string]string {
 	if cachedRoots != nil && time.Since(cachedRootsAt) < 10*time.Minute {
 		return cachedRoots
