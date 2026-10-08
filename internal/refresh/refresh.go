@@ -125,12 +125,16 @@ func rebuildWarehouse(repoRoot, cache string, src pidata.Source) error {
 	if err := os.MkdirAll(work, 0o755); err != nil {
 		return err
 	}
-	defer os.RemoveAll(filepath.Join(work, "pi-snapshot"))
-
 	snap, err := pidata.Snapshot(src.Dir, work)
 	if err != nil {
 		return fmt.Errorf("pi snapshot: %w", err)
 	}
+	defer func() {
+		if err := pidata.RemoveSnapshot(snap); err != nil {
+			fmt.Fprintf(os.Stderr, "[warn] 清理 pi 快照目录失败: %v\n", err)
+		}
+	}()
+
 	data, err := pidata.Read(snap, src.DBPath)
 	if err != nil {
 		return fmt.Errorf("pi read: %w", err)

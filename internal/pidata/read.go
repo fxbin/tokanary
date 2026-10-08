@@ -23,6 +23,8 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
+	"time"
 
 	"github.com/fxbin/tokanary/internal/clisession"
 )
@@ -100,34 +102,106 @@ func DetectPiDirs() []Source {
 	return out
 }
 
-// Snapshot copies the source db to work/pi-snapshot/pi.sqlite at a commit
-// boundary. Direct file copies of db+-wal+-shm can read a torn view while pi
-// is rewriting, which was measured to drop rows; this cannot.
+// snapshotDirPrefix names the private directory each Snapshot gets. It is a
+// constant because RemoveSnapshot refuses to delete anything that does not
+// carry it, and because sweepStaleSnapshots recognises leftovers by it.
+const snapshotDirPrefix = "pi-snapshot-"
+
+// Snapshot copies the source db into a private directory under work at a
+// commit boundary, and returns the copy's path. Direct file copies of
+// db+-wal+-shm can read a torn view while pi is rewriting, which was measured
+// to drop rows; this cannot.
+//
+// The directory carries a random suffix on purpose. A fixed name is shared by
+// every process that snapshots the same repository - the desktop window's
+// read-time refresh, a `tokanary refresh` run, the scheduled task - and the
+// two then fight over one file. On Windows that is not a benign race:
+// os.RemoveAll fails outright while the other process still holds the sqlite
+// handle, so whoever lost the race aborted its whole refresh and the
+// dashboard silently served stale numbers. A name nobody else can guess makes
+// the collision impossible instead of merely unlikely. The caller owns the
+// directory and must hand the returned path to RemoveSnapshot.
 func Snapshot(srcDir, work string) (string, error) {
 	src := filepath.Join(srcDir, DBName)
 	if _, err := os.Stat(src); err != nil {
 		return "", fmt.Errorf("找不到数据库: %s", src)
 	}
-	tmp := filepath.Join(work, "pi-snapshot")
-	if err := os.RemoveAll(tmp); err != nil {
+	tmp, err := os.MkdirTemp(work, snapshotDirPrefix)
+	if err != nil {
 		return "", err
 	}
-	if err := os.MkdirAll(tmp, 0o755); err != nil {
-		return "", err
-	}
+	sweepStaleSnapshots(work)
 	dst := filepath.Join(tmp, DBName)
 
 	db, err := sql.Open("sqlite", "file:"+filepath.ToSlash(src)+"?mode=ro")
 	if err != nil {
+		os.RemoveAll(tmp)
 		return "", err
 	}
 	defer db.Close()
 	// single-quote the path; SQLITE does not accept a bound param here
 	escaped := filepath.ToSlash(dst)
 	if _, err := db.Exec(`VACUUM INTO '` + escaped + `'`); err != nil {
+		os.RemoveAll(tmp)
 		return "", fmt.Errorf("快照失败: %w", err)
 	}
 	return dst, nil
+}
+
+// RemoveSnapshot deletes the private directory Snapshot created. An empty path
+// is a no-op so a caller can defer this before the error check.
+//
+// It reports the failure instead of swallowing it. Cleanup almost always runs
+// from a defer, and an abandoned snapshot directory is invisible until the next
+// run trips over it - exactly the kind of failure that gets misread as "my
+// numbers are stale".
+//
+// The name is checked because this deletes a directory derived from its
+// argument, and a wrong argument is otherwise silent and expensive: hand it an
+// ordinary file path and the whole parent goes away, returning nil.
+func RemoveSnapshot(snap string) error {
+	if snap == "" {
+		return nil
+	}
+	dir := filepath.Dir(snap)
+	if !strings.HasPrefix(filepath.Base(dir), snapshotDirPrefix) {
+		return fmt.Errorf("拒绝删除 %s：不是快照目录（应形如 %s...）", dir, snapshotDirPrefix)
+	}
+	return os.RemoveAll(dir)
+}
+
+// staleSnapshotAge is how long an orphaned snapshot directory survives. It is
+// generous because a snapshot of a 130MB source takes seconds to build and a
+// slow disk can stretch that; anything older than this lost its process.
+const staleSnapshotAge = time.Hour
+
+// sweepStaleSnapshots deletes snapshot directories left behind by a killed
+// process.
+//
+// Before per-process names, a crash was self-healing: the next Snapshot ran
+// RemoveAll on the one fixed directory. Unique names bought concurrency safety
+// and gave that self-healing up, and each orphan is a full copy of the source
+// db - so without this, repeated kills would grow .cache without bound. Only
+// directories old enough that no live process can still be writing are touched,
+// which is also what keeps concurrent Snapshots safe from each other.
+//
+// Best effort by design: a directory held open on Windows simply stays.
+func sweepStaleSnapshots(work string) {
+	entries, err := os.ReadDir(work)
+	if err != nil {
+		return
+	}
+	cutoff := time.Now().Add(-staleSnapshotAge)
+	for _, e := range entries {
+		if !e.IsDir() || !strings.HasPrefix(e.Name(), snapshotDirPrefix) {
+			continue
+		}
+		info, err := e.Info()
+		if err != nil || info.ModTime().After(cutoff) {
+			continue
+		}
+		_ = os.RemoveAll(filepath.Join(work, e.Name()))
+	}
 }
 
 // SessionRow is one warehouse sessions row.

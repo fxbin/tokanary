@@ -324,7 +324,11 @@ func piModelIDs(piDir, workDir string) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer os.RemoveAll(filepath.Join(workDir, "pi-snapshot"))
+	defer func() {
+		if err := pidata.RemoveSnapshot(snap); err != nil {
+			fmt.Fprintf(os.Stderr, "[warn] 清理 pi 快照目录失败: %v\n", err)
+		}
+	}()
 
 	data, err := pidata.Read(snap, src.DBPath)
 	if err != nil {

@@ -25,6 +25,16 @@ type whOpts struct {
 }
 
 func runWarehouse(args []string) int {
+	// The parity gate compares against a payload produced OUTSIDE this
+	// repository, by the collector that predates the Go pipeline. That
+	// reference is the whole point of the gate, so it cannot be substituted
+	// with something this repo builds itself: LoadDashboardPayload parses the
+	// `window.X = {...};` shape, while .cache/dashboard.json is bare JSON whose
+	// `convention` string contains "=" - and even past that, its meta block
+	// carries a date-only range and dbVersion 0, which the comparison would
+	// report as drift on every run. The default is therefore a name that only
+	// resolves where the old reference still exists; pass --against to point
+	// somewhere else.
 	o := whOpts{dbPath: ".cache/tokanary.sqlite", against: "data.js"}
 	for i := 0; i < len(args); i++ {
 		switch args[i] {
@@ -73,7 +83,11 @@ func runWarehouse(args []string) int {
 		fmt.Fprintf(os.Stderr, "[error] %v\n", err)
 		return 1
 	}
-	defer os.RemoveAll(filepath.Join(work, "pi-snapshot"))
+	defer func() {
+		if err := pidata.RemoveSnapshot(snap); err != nil {
+			fmt.Fprintf(os.Stderr, "[warn] 清理 pi 快照目录失败: %v\n", err)
+		}
+	}()
 
 	data, err := pidata.Read(snap, src.DBPath)
 	if err != nil {

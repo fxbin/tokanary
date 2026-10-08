@@ -22,7 +22,6 @@ type buildOpts struct {
 	dbPath     string
 	adapters   string
 	workDir    string
-	includeAgg bool
 	noExternal bool
 	check      bool
 	against    string
@@ -67,8 +66,6 @@ func runBuild(args []string) int {
 				i++
 				o.workDir = args[i]
 			}
-		case "--include-aggregators":
-			o.includeAgg = true
 		case "--no-external":
 			o.noExternal = true
 		case "--check":
@@ -96,7 +93,11 @@ func runBuild(args []string) int {
 		fmt.Fprintf(os.Stderr, "[error] %v\n", err)
 		return 1
 	}
-	defer os.RemoveAll(filepath.Join(o.workDir, "pi-snapshot"))
+	defer func() {
+		if err := pidata.RemoveSnapshot(snap); err != nil {
+			fmt.Fprintf(os.Stderr, "[warn] 清理 pi 快照目录失败: %v\n", err)
+		}
+	}()
 
 	data, err := pidata.Read(snap, src.DBPath)
 	if err != nil {
