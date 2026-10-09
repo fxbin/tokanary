@@ -19,6 +19,9 @@ web/coverage/
 # parks the old image next to it instead of replacing it.
 /tokanary-desktop.exe~
 
+# release packages: two ~14MB binaries plus a checksum file
+dist-tokanary-*/
+
 # analysis store (rebuildable)
 *.sqlite
 *.sqlite-wal
