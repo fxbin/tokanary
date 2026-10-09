@@ -300,7 +300,7 @@ describe('U2 hours heatmap', () => {
     // 标题必须点名来源：只有 pi 侧有 hours 粒度，不点名就与同屏 dayChart 的
     // 全工具合计共用一个「总量」的读法（§7.5）。
     expect(html).toContain('时段热力图')
-    expect(html).toContain('全部工具本地时合计')
+    expect(html).toContain('个工具本地时合计（含 pi）')
     expect(html).toContain('洞察')
     expect(html).toContain('月末预测')
     expect(html).not.toMatch(/NaN/)
@@ -329,9 +329,10 @@ describe('U3 models tab', () => {
     expect(html).toContain('data-field=')
     expect(html).toContain('data-key=')
     expect(html).toContain('范围内 Token')
-    // 单价覆盖 KPI 必须写明是 pi 侧,别让 3/3 看着像全量 29 个模型都匹配上了
-    expect(html).toContain('pi 侧已匹配单价')
-    expect(html).toContain('外部工具 ')
+    // 单价覆盖 KPI 必须把两个来源的分数都写出来,别让 pi 的 14/14 看着像全量都匹配上了。
+    // 两个分数并列而不合并：pi 与外部有同名模型（交集 4 个），相加会重复计数。
+    expect(html).toContain('已匹配单价')
+    expect(html).toContain('外部 ')
     expect(html).not.toContain('已匹配价格')
     if (!html.includes('当前范围内没有模型用量')) expect(html).toContain('<svg')
     expect(html).not.toMatch(/NaN/)
@@ -748,7 +749,7 @@ describe('本周 Top：表头窗口必须与列表同源', () => {
     const otherWk = isoWeekRange(rangeAnchor(DATA))!
     if (otherWk.start !== wk.start) expect(html).not.toContain(otherWk.start + ' ~ ' + otherWk.end)
     // 范围写明只覆盖 pi 侧 dayModel
-    expect(html).toContain('仅 pi 侧 dayModel')
+    expect(html).toContain('仅 pi 侧模型（外部工具的用量见下方各工具行）')
   })
 })
 

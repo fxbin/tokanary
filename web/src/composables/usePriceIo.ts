@@ -1,7 +1,17 @@
 import { ref, type Ref } from 'vue'
 import type { UiState } from '../render'
 
-const STORE_KEY = 'pi-token-pricing-v1'
+/**
+ * 偏好存储键。这个账本覆盖全部检测到的工具，早先的键名却叫
+ * `pi-token-pricing-v1` —— 设置页把它当实现细节印出来，看上去就像这个产品
+ * 只管 pi。改名会让老用户丢掉手填的价格覆盖与月预算，所以读的时候两个键都认，
+ * 写只写新的。
+ */
+const STORE_KEY = 'tokanary-settings-v1'
+const LEGACY_STORE_KEYS = ['pi-token-pricing-v1']
+
+/** 设置页要把它当实现细节印出来（帮助排查「我的设置存哪了」），所以导出。 */
+export const STORE_KEY_NAME = STORE_KEY
 
 export function usePriceIo(st: UiState) {
   const ioText = ref('')
@@ -18,7 +28,15 @@ export function usePriceIo(st: UiState) {
 
   function loadState() {
     try {
-      const raw = localStorage.getItem(STORE_KEY)
+      // 新键优先；没有才回落到旧键，这样改名不会静默吃掉用户已填的预算与改价。
+      let raw: string | null = null
+      try { raw = localStorage.getItem(STORE_KEY) } catch { /* ignore */ }
+      if (!raw) {
+        for (const k of LEGACY_STORE_KEYS) {
+          try { raw = localStorage.getItem(k) } catch { /* ignore */ }
+          if (raw) break
+        }
+      }
       if (raw) {
         const o = JSON.parse(raw)
         if (o && typeof o === 'object') {
