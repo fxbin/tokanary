@@ -187,7 +187,8 @@ suite('总览：同一笔钱不得加自己', () => {
     const ext = externalSummary(DATA, st.policy)
     const pi = rangeStats(DATA, s, dailyCost(DATA, s), 'all').cost
     const extCost = rangeExt(ext, 'all', rangeAnchor(DATA)).totalCost
-    expect(overview('all')).toContain('pi ' + money(pi) + ' + 外部 ' + money(extCost))
+    const nTools = (ext as any).rows.length
+    expect(overview('all')).toContain('pi ' + money(pi) + ' + 其他 ' + nTools + ' 个工具 ' + money(extCost))
   })
 
   it('没有外部数据时退回单一口径，不出 NaN / 空串', () => {
@@ -195,6 +196,7 @@ suite('总览：同一笔钱不得加自己', () => {
     const html = renderOverview(bare, defaultUiState(), cmp, 'all')
     expect(html).not.toMatch(/NaN/)
     expect(html).not.toContain('外部 $')
+    expect(html).not.toContain('其他 ')
     expect(html).toContain('models.dev 单价')
   })
 })

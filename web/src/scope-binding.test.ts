@@ -7,9 +7,11 @@
  * 检查对象是渲染函数，不是源码文本：手写字符串渲染没有可静态分析的绑定关系，
  * 能验的只有「换掉状态之后输出变没变、变的部分有没有自报口径」。
  */
+import * as fs from 'node:fs'
 import { describe, it, expect } from 'vitest'
 import {
-  renderSettings, renderProjects, renderOverview, budgetAlertHtml,
+  renderSettings, renderProjects, renderOverview, renderModels, renderSessions,
+  budgetAlertHtml,
   BUDGET_SCOPE_LABEL, compareSources, defaultUiState, monthToDateCost
 } from './render'
 
@@ -113,6 +115,57 @@ describe('§7.5 隐状态绑定 · 审计三问', () => {
   it('budgetAlertHtml 强制要求口径标签（签名层防回归）', () => {
     // @ts-expect-error 少传 scopeLabel 应当编译失败
     budgetAlertHtml(60, 100)
+  })
+})
+
+/* §7.7 定位措辞：这个账本覆盖全部检测到的工具，界面不许把 pi 当主语。
+ * 这一批是扫**已发布适配器**的回归护栏 —— 文案写错时不会有任何编译错误，
+ * 只会安静地把一个 6 工具的账本说成 pi 的附庸。 */
+describe('§7.7 定位措辞', () => {
+  it('全库文案不得出现把 pi 摆进主位的措辞', () => {
+    const data = JSON.parse(fs.readFileSync('../.cache/dashboard.json', 'utf8'))
+    const st = defaultUiState()
+    st.budgetUsd = 200
+    const cmp = compareSources(data, st)
+    const pages = {
+      overview: renderOverview(data, st, cmp, '7d'),
+      models: renderModels(data, st, cmp, '7d'),
+      sessions: renderSessions(data, st, cmp, '7d'),
+      projects: renderProjects(data, st, cmp, '7d'),
+      settings: renderSettings(data, st, cmp, '7d', '')
+    }
+    // 「外部 + $」把其余工具说成附属品；正确写法是「其他 N 个工具」。
+    for (const [name, html] of Object.entries(pages)) {
+      expect(html, name + ' 出现了「外部 $」').not.toContain('外部 $')
+      // 自定义价格源已删除，声明它就是 §7.3 的撒谎。
+      expect(html, name + ' 仍宣称有自定义价格源').not.toContain('自定义')
+    }
+    // 主语位置不许出现「pi 侧已匹配」这类把 pi 抬成主体的标签。
+    expect(pages.models).not.toContain('pi 侧已匹配单价')
+    expect(pages.models).toContain('已匹配单价')
+  })
+
+  /* 真的只有 pi 才有的数据，限定词必须留着 —— 删掉它就是撒谎，比措辞偏向
+   * 更严重。所以这两个断言是双向的：既不许抬高 pi，也不许抹掉真实的边界。 */
+  it('仅 pi 才有的区块必须保留限定词，并指明其余工具的用量在哪看', () => {
+    const data = JSON.parse(fs.readFileSync('../.cache/dashboard.json', 'utf8'))
+    const html = renderOverview(data, defaultUiState(), compareSources(data, defaultUiState()), '7d')
+    expect(html).toContain('仅 pi 侧模型')
+    expect(html).toContain('外部工具的用量见下方各工具行')
+  })
+
+/* 两个来源的分数不许求和：pi 与外部有同名模型，求和会重复计数（§7.1）。
+   * 同时钉住量词：那个数字是**模型**行数，不是工具数 —— 写成「N 个工具」会
+   * 把 17 个模型说成 17 个工具（本机只有 5 个外部工具）。 */
+  it('单价覆盖 KPI 并列两个分数，不合并；量词是模型不是工具', () => {
+    const data = JSON.parse(fs.readFileSync('../.cache/dashboard.json', 'utf8'))
+    const html = renderModels(data, defaultUiState(), compareSources(data, defaultUiState()), '7d')
+    const m = html.match(/已匹配单价[\s\S]{0,120}?(\d+)\/(\d+) · (\d+)\/(\d+)/)
+    expect(m, 'KPI 未并列两个分数').not.toBeNull()
+    // 主标签本身不再是「pi 侧…」
+    expect(html).not.toMatch(/pi 侧已匹配单价/)
+    expect(html).toContain('个模型')
+    expect(html).not.toMatch(/外部 \d+ 个工具/)
   })
 })
 

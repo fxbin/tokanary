@@ -7,6 +7,7 @@ import {
 import { MODEL_COLORS, stackBar, donut, legend, dayChart, trimNum } from '../charts'
 import { th, sourceTag, stableColorIndex, sesRecency, pad2, localDay, esc, type UiState } from './shared'
 import { budgetAlertHtml, BUDGET_SCOPE_LABEL, BUDGET_TIERS } from './projects'
+import { STORE_KEY_NAME } from '../composables/usePriceIo'
 
 export function renderSettings(data: any, st: UiState, cmp: Record<string, number>, _range: RangeKey, ioText: string, ioError = ''): string {
   if (!data) {
@@ -109,8 +110,8 @@ export function renderSettings(data: any, st: UiState, cmp: Record<string, numbe
   html.push('<textarea id="io" placeholder="点「导出手动改价」后 JSON 出现在这里；粘贴 JSON 后点「导入手动改价」">' + esc(ioText) + '</textarea>')
   html.push('</div></section>')
 
-  html.push('<div class="note"><b>设置持久化</b>：口径 / 策略 / 改价 / 预算 存在 localStorage ' +
-    '（键 <code>pi-token-pricing-v1</code>），刷新不丢。' +
+  html.push('<div class="note"><b>设置持久化</b>：口径 / 策略 / 改价 / 预算 存在本机 localStorage' +
+    '（键 <code>' + esc(STORE_KEY_NAME) + '</code>），刷新不丢。' +
     '导入导出只覆盖价格相关字段，不动预算与主题。</div>')
   return html.join('')
 }

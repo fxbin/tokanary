@@ -32,10 +32,12 @@ export function renderOverview(data: any, st: UiState, cmp: Record<string, numbe
   const anchor = rangeAnchor(data)
 
   /* hero */
-  // 合计一格就够；pi / 外部两个绝对值放 sub，不做百分比占比 —— 合并序列里没有
-  // 「pi 占多少」这个可成立的测量（rs.cost 已含外部，再除一次必然自指）。
+  /* 合计一格就够；两个来源放 sub，不做百分比占比 —— 合并序列里没有「pi 占多少」
+   * 这个可成立的测量（rs.cost 已含外部，再除一次必然自指）。
+   * 措辞上不把 pi 当主语：「其他 N 个工具」说明这是一次平铺的拆分，而不是
+   * 「主体 + 附属」。 */
   const splitSub = ext
-    ? 'pi ' + money(piRs.cost) + ' + 外部 ' + money(re.totalCost)
+    ? 'pi ' + money(piRs.cost) + ' + 其他 ' + re.rows.length + ' 个工具 ' + money(re.totalCost)
     : 'models.dev 单价 · 摊算'
   const hero: Array<{ label: string; value: string; sub: string }> = [
     { label: rangeLabel + '费用', value: money(rs.cost), sub: splitSub },
@@ -190,7 +192,10 @@ html.push('<section class="card insights">')
   html.push('<section class="card">')
   html.push('<h2>本周 Top 模型 <span class="hint">' +
     esc(weekStartNote || '以数据最大日所在周计') +
-    ' · 仅 pi 侧 dayModel · 按费用降序 · token 精确聚合</span></h2>')
+    /* 这一段是真的只有 pi 的逐日逐模型明细，所以「仅 pi 侧」必须留着 ——
+     * 改成「全部工具」就是 §7 铁律 3 的撒谎。但必须同时告诉读者外部工具的用量
+     * 在哪里看，否则整块卡片会让人以为本账本只统计 pi。 */
+    ' · 仅 pi 侧模型（外部工具的用量见下方各工具行） · 按费用降序 · token 精确聚合</span></h2>')
   if (!weekTop.length) {
     html.push('<div class="empty">本周暂无数据 —— dayModel 缺失或该周无用量。</div>')
   } else {
@@ -225,7 +230,7 @@ html.push('<section class="card insights">')
   const extHourTools = hourToolCount(data)
   html.push('<section class="card">')
   html.push('<h2>时段热力图 <span class="hint">星期 × 小时 · 格色 = token 强度 · ' +
-    '全部工具本地时合计' + (extHourTools > 0 ? '（pi + ' + extHourTools + ' 个外部工具）' : '（仅 pi）') +
+    '全部 ' + (extHourTools + 1) + ' 个工具本地时合计（含 pi）' +
     ' · 无小时粒度的工具按日统计、不在本图内 · 鼠标悬停看该格明细</span></h2>')
   if (!allHours.length) {
     html.push('<div class="empty">重新跑 tokanary refresh 获取小时粒度（仓库需含 hours 字段）。</div>')

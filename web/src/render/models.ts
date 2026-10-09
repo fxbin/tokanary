@@ -196,11 +196,20 @@ export function renderModels(data: any, st: UiState, cmp: Record<string, number>
   html.push('<section class="kpis">')
   const piPriced = s.rows.filter(function (r: any) { return r.price && r.price.source !== 'missing' }).length
   const extPriced = extRows.filter(function (e) { return e.priced }).length
+  /* 单价匹配覆盖。**不合并成一个总数**：pi 侧与外部工具侧有同名模型（实测 14 与 21
+   * 个唯一名里交集 4 个：kimi-k3 / qwen3.8-max / claude-fable-5 / claude-opus-5），
+   * 相加会让同一批模型数两次 —— 分子分母重叠，违反 §7 铁律 1。而「pi 侧」也不该
+   * 当主语：这个账本覆盖的是全部检测到的工具，pi 只是其中一个。
+   * 所以两个分数并列，各自的分子分母各自闭合，谁也不吃掉谁。 */
   const mHero = [
     { label: rangeLabel + '模型数', value: String(stackRows.length || 0), sub: '有范围内用量的模型' },
     { label: rangeLabel + '模型费用', value: money(costItems.reduce(function (t: number, x: any) { return t + x.value }, 0)), sub: '按各模型均价摊算' },
     { label: '全量 Token', value: fmt(s.totalTokens), sub: '含缓存读写' },
-    { label: 'pi 侧已匹配单价', value: piPriced + '/' + s.rows.length, sub: '外部工具 ' + extPriced + '/' + extRows.length + ' · 手动 > 自定义 > 口径' }
+    {
+      label: '已匹配单价',
+      value: piPriced + '/' + s.rows.length + ' · ' + extPriced + '/' + extRows.length,
+      sub: 'pi 侧 · 外部 ' + extRows.length + ' 个模型 · 手动 > 口径'
+    }
   ]
   html.push(mHero.map(function (k) {
     return '<div class="kpi"><div class="kpi-l">' + esc(k.label) +
