@@ -9,6 +9,18 @@ import { th, sourceTag, stableColorIndex, sesRecency, pad2, localDay, esc, type 
 import { budgetAlertHtml, BUDGET_SCOPE_LABEL, BUDGET_TIERS } from './projects'
 import { STORE_KEY_NAME } from '../composables/usePriceIo'
 
+/** 价表抓取日期距今天数。读不出来返回 null —— 那时不该显示任何天数。 */
+export function priceAgeDays(fetchedAt: any): number | null {
+  const s = typeof fetchedAt === 'string' ? fetchedAt.slice(0, 10) : ''
+  const t = Date.parse(s + 'T00:00:00')
+  if (!s || isNaN(t)) return null
+  const today = new Date()
+  const t0 = Date.parse(today.getFullYear() + '-' +
+    String(today.getMonth() + 1).padStart(2, '0') + '-' +
+    String(today.getDate()).padStart(2, '0') + 'T00:00:00')
+  return Math.round((t0 - t) / 86400000)
+}
+
 export function renderSettings(data: any, st: UiState, cmp: Record<string, number>, _range: RangeKey, ioText: string, ioError = ''): string {
   if (!data) {
     return '<div class="empty">没有用量数据 —— 请先运行 <code>tokanary refresh</code> 重建仓库。</div>'
@@ -70,10 +82,18 @@ export function renderSettings(data: any, st: UiState, cmp: Record<string, numbe
   html.push('<div class="settings">')
   /* 只读陈述，不是设置行：用 .note 而非 .set-row。这行没有可调项，却和输入框
    * 同视觉权重，扫一眼会以为能改 —— 界面暗示了兑现不了的承诺（§7 铁律 3）。 */
+  // 价表年龄要跟着金额一起报出来：价表过期不会让任何一个数字变 $0，它只是让新
+  // 模型悄悄按 0 算，所以「第几天抓的」是这条信息的必要部分，不是脚注。
+  const ageDays = priceAgeDays(pm.fetchedAt)
+  const ageNote = ageDays === null
+    ? ''
+    : ageDays > 7
+      ? ' · <b class="warn-ink">已 ' + ageDays + ' 天未更新</b>'
+      : ' · ' + ageDays + ' 天前更新'
   html.push('<div class="note src-note">单价来源：' +
     esc((SOURCES as any)[srcKey].label) +
     ' · <b>' + money((cmp as any)[srcKey]) + '</b>' +
-    ' · 抓取于 ' + esc(pm.fetchedAt || '未知') +
+    ' · 抓取于 ' + esc(pm.fetchedAt || '未知') + ageNote +
     ' · 本机 ' + s.rows.length + ' 个模型里 ' + matched + ' 个已匹配单价' +
     (s.rows.length > matched ? '，其余 ' + (s.rows.length - matched) + ' 个在模型页填价后计入金额' : '') +
     (pmSrc && pmSrc !== 'models.dev' ? ' · 底表源 <code>' + esc(pmSrc) + '</code>' : '') +
@@ -94,7 +114,7 @@ export function renderSettings(data: any, st: UiState, cmp: Record<string, numbe
       : '') +
     '<button id="btn-export">导出手动改价</button>' +
     '<button id="btn-import">导入手动改价</button>' +
-    '<button id="btn-reload">重新读取</button>' +
+    '<button id="btn-reload">重读仓库数据</button>' +
     '</div>')
   /* 撤销只在真的清空过之后才出现 —— 没有撤销可给的时候不渲染（Nielsen：
      * 用户必须始终看得见系统状态并保有控制权）。 */
@@ -113,5 +133,11 @@ export function renderSettings(data: any, st: UiState, cmp: Record<string, numbe
   html.push('<div class="note"><b>设置持久化</b>：口径 / 策略 / 改价 / 预算 存在本机 localStorage' +
     '（键 <code>' + esc(STORE_KEY_NAME) + '</code>），刷新不丢。' +
     '导入导出只覆盖价格相关字段，不动预算与主题。</div>')
+  /* 价表是自动更新的，但自动不等于用户知道。说清周期、说清怎么手动来 —— 否则
+   * 「抓取于」只是历史信息，而不是一个可操作的提示。 */
+  html.push('<div class="note"><b>价表更新</b>：models.dev 价表每 7 天自动重抓一次，' +
+    '随 <code>tokanary collect</code> / <code>refresh</code> 顺带完成（窗口开着也会）。' +
+    '抓取失败会保留旧表并照常出数，只在命令行提示。手动更新：' +
+    '<code>tokanary prices --force</code>；只想看新鲜度：<code>tokanary prices --status</code>。</div>')
   return html.join('')
 }
