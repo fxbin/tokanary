@@ -12,7 +12,7 @@ import { renderOverview, renderModels, renderSessions, renderProjects, renderSet
 import { externalModelRows } from './render/models'
 import { BUDGET_SCOPE_LABEL } from './render/projects'
 import { useHashRoute } from './composables/useHashRoute'
-import { heatmap, MODEL_COLORS } from './charts'
+import { heatmap, heatTone, MODEL_COLORS } from './charts'
 import { mergeAllHours, hourToolCount } from './pricing'
 import { CATS } from './pricing'
 import { mergeDailyUsage } from './range'
@@ -141,6 +141,58 @@ describe('U2 hours heatmap', () => {
     expect(m[4][0]).toBe(300)
     const sum = m.reduce((t, r) => t + r.reduce((a, b) => a + b, 0), 0)
     expect(sum).toBe(650) // 100+50+200+300
+  })
+
+  /* 量级编码：离散五档 + 零值反向修复 + 霁青退出数据面。 */
+  it('heatTone: 离散五档;空格最弱且最轻', () => {
+    const max = 10000
+    expect(heatTone(0, max)).toBe(0)
+    expect(heatTone(-1, max)).toBe(0)
+    expect(heatTone(100, max)).toBe(1)      // r=0.10
+    expect(heatTone(1000, max)).toBe(2)     // r≈0.316
+    expect(heatTone(4000, max)).toBe(3)     // r≈0.632
+    expect(heatTone(9000, max)).toBe(4)
+    expect(heatTone(max, max)).toBe(4)
+    expect(heatTone(1, 0)).toBe(0)
+    // 档位随值单调不减 —— 不会出现「值更大反而更浅」。
+    let prev = 0
+    for (let v = 1; v <= max; v += 137) {
+      const t = heatTone(v, max)
+      expect(t).toBeGreaterThanOrEqual(prev)
+      prev = t
+    }
+  })
+
+  it('heatmap: 霁青退出数据面;空格用最轻档;图例给绝对值', () => {
+    const m = hourMatrix(hourFixture().hours)
+    const html = heatmap(m, { sourceLabel: '全部工具 · 本地时' })
+    // §2 铁律 1：主色只属导航选中与主动作，不得做数据面。
+    expect(html).not.toContain('var(--accent)"')
+    expect(html).not.toContain('fill="var(--accent)"')
+    expect(html).toContain('var(--hm-0)')
+    expect(html).toContain('var(--hm-4)')
+    // 零值反向修复：空格必须落在第 0 档（旧实现用 --line@0.35，比最弱数据格更重）。
+    expect(html).toContain('fill="var(--hm-0)"')
+    // 离散：不再有连续 opacity。
+    expect(html).not.toMatch(/opacity="/)
+    // 非颜色通道：图例带绝对端点，不写「强度」。
+    expect(html).toContain('hm-legend')
+    expect(html).toContain('峰值')
+    expect(html).not.toContain('强度')
+  })
+
+  it('heatmap: 恰好两个 tab stop（摘要 + 峰值格）', () => {
+    const m = hourMatrix(hourFixture().hours)
+    const html = heatmap(m, { sourceLabel: '全部工具 · 本地时' })
+    const stops = (html.match(/tabindex="0"/g) || []).length
+    expect(stops).toBe(2)
+    // 其余 167 格不进 Tab 序列，但仍各自带可读的 <title>。只在 <svg> 内数，
+    // 图例自己也是一个 aria-hidden 节点。
+    const svg = html.slice(html.indexOf('<svg'), html.indexOf('</svg>'))
+    expect((svg.match(/aria-hidden="true"/g) || []).length).toBe(168 - 1)
+    expect(html).toContain('role="img"')
+    expect(html).toMatch(/aria-label="峰值/)
+    expect(html).toMatch(/aria-label="[^"]*时段热力图：/)
   })
 
   /* 时段热力图覆盖全部工具：pi 侧的 hours 加上每个外部工具自己的 hours。

@@ -191,9 +191,19 @@ footer.foot { max-width: 1360px; margin: 8px auto 0; color: var(--dim); font-siz
 .week-pct { color: var(--dim); font-size: 11.5px; }
 
 /* U2: heatmap */
-.heatmap rect { transition: opacity .15s; }
+/* 焦点环：SVG 自身可聚焦（摘要）与峰值格可聚焦，键盘用户必须看得见自己在哪。
+   数据面禁用玻璃模糊（§4），这里用 --accent 描边而不是发光。 */
+.heatmap:focus { outline: 2px solid var(--accent); outline-offset: 2px; }
+.heatmap rect:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+.heatmap rect { transition: none; }
 .heatmap rect:hover { stroke: var(--fg); stroke-width: 1.5; }
-.hm-cap { margin-top: 8px; text-align: right; }
+
+/* 图例是颜色之外的第二条通道：两端给出绝对量，中间不写「强度」这种无锚点的词。 */
+.hm-legend { display: flex; align-items: center; gap: 5px; margin-top: 7px; justify-content: flex-end; }
+.hm-key { font-size: 11px; }
+.hm-sw { width: 9px; height: 9px; border-radius: 2px; display: inline-block; }
+.hm-anchor { margin-left: 10px; }
+.hm-cap { margin-top: 5px; text-align: right; }
 
 /* U4: 项目钻取 */
 .proj-rows { display: flex; flex-direction: column; gap: 6px; margin-top: 14px; }
