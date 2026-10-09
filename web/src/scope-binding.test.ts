@@ -12,7 +12,7 @@ import { describe, it, expect } from 'vitest'
 import {
   renderSettings, renderProjects, renderOverview, renderModels, renderSessions,
   budgetAlertHtml,
-  BUDGET_SCOPE_LABEL, compareSources, defaultUiState, monthToDateCost
+  BUDGET_SCOPE_LABEL, compareSources, defaultUiState, monthToDateCost, priceAgeDays
 } from './render'
 
 /** 一天 1000 token 的合成数据：跨月铺开，好让「本月至今」不等于「全部」。 */
@@ -166,6 +166,36 @@ describe('§7.7 定位措辞', () => {
     expect(html).not.toMatch(/pi 侧已匹配单价/)
     expect(html).toContain('个模型')
     expect(html).not.toMatch(/外部 \d+ 个工具/)
+  })
+})
+
+/* 价表年龄必须跟着金额一起报出来。价表过期不会让任何数字变 $0 —— 它只是让新模型
+ * 悄悄按 0 算，所以「第几天抓的」是这条信息的必要部分而不是脚注。 */
+describe('价表新鲜度', () => {
+  it('priceAgeDays: 读得出天数；读不出返回 null 而非 0', () => {
+    const today = new Date()
+    const iso = today.getFullYear() + '-' +
+      String(today.getMonth() + 1).padStart(2, '0') + '-' +
+      String(today.getDate()).padStart(2, '0')
+    expect(priceAgeDays(iso)).toBe(0)
+    expect(priceAgeDays(iso + 'T10:00:00Z')).toBe(0)
+    expect(priceAgeDays(null)).toBeNull()
+    expect(priceAgeDays('')).toBeNull()
+    expect(priceAgeDays('未知')).toBeNull()
+  })
+
+  it('设置页写出价表年龄与自动更新周期', () => {
+    const data = JSON.parse(fs.readFileSync('../.cache/dashboard.json', 'utf8'))
+    const st = defaultUiState()
+    const html = renderSettings(data, st, compareSources(data, st), '7d', '')
+    expect(html).toContain('抓取于')
+    expect(html).toContain('天前更新')
+    expect(html).toContain('每 7 天自动重抓一次')
+    expect(html).toContain('tokanary prices --force')
+    expect(html).toContain('tokanary prices --status')
+    // 「重新读取」这个名字名不副实：它只重读仓库，不碰网络。
+    expect(html).toContain('重读仓库数据')
+    expect(html).not.toContain('重新读取')
   })
 })
 

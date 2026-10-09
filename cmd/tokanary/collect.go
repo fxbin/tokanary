@@ -31,6 +31,7 @@ func runCollect(args []string) int {
 		fmt.Fprintln(os.Stderr, "[error] 找不到仓库根（需要包含 data/adapters 的目录）")
 		return 1
 	}
+	quiet := hasFlag(args, "--quiet")
 	o := collectOpts{
 		adapters:    filepath.Join(repoRoot, "data", "adapters"),
 		out:         externalUsagePath(repoRoot),
@@ -242,6 +243,23 @@ func runCollect(args []string) int {
 
 	// Price resolution: curated models.dev table only (.cache/prices-raw.json).
 	// No gateway overlay.
+	//
+	// The table ages: models get added and repriced upstream on a weekly-ish
+	// cadence, and a stale table does not announce itself - it just prices the
+	// models you are actually running at $0. So refresh it here when it has aged
+	// out. This is the single hook: `refresh` calls runCollect, and the desktop's
+	// incremental Touch does too, so one placement covers every entry point.
+	// maybeRefreshPrices never fails the run and never leaves the table missing -
+	// a slow website must not stop a collect.
+	if !hasFlag(args, "--no-prices") {
+		_, _ = maybeRefreshPrices(priceOpts{
+			RepoRoot:  findRepoRoot(),
+			Out:       o.curatedPath,
+			WorkDir:   o.workDir,
+			IncludePi: true,
+			Quiet:     quiet,
+		}, pricing.DefaultPriceMaxAge, time.Now())
+	}
 	curated, _, hasCurated := pricing.LoadCurated(o.curatedPath)
 	if !hasCurated {
 		fmt.Fprintln(os.Stderr, "[warn] .cache/prices-raw.json 缺失，模型将多数标记为 unpriced")

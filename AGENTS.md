@@ -32,7 +32,9 @@ cd web && npm test && npm run build
 | `tokanary refresh` | 全量采集 + 重建仓库 + 构建前端 |
 | `tokanary collect` | 只采集外部 CLI（源文件未变则复用；`--full` 全量） |
 | 桌面 `/api/dashboard` | **读取时增量刷新**（`internal/refresh.Touch`）：适配器 mtime + pi.sqlite 指纹 |
-| `tokanary prices` | 生成 `.cache/prices-raw.json` |
+| `tokanary prices` | 生成 `.cache/prices-raw.json`。**每 7 天自动重抓**，随 `collect`/`refresh`/桌面轮询顺带完成 |
+| `tokanary prices --status` | 只看价表新鲜度，不联网 |
+| `tokanary prices --force` | 手动立刻重抓（旧表先写 `.bak`） |
 | `tokanary build` | 重建仓库并写 `.cache/dashboard.json` |
 
 ## 布局
