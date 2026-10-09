@@ -4,6 +4,7 @@ import {
   dailyCost, externalSummary, rangeStats, rangeExt, rangeAnchor, withMergedDays, mergeDailyCost,
   filterHoursByRange, hourMatrix, rangeInsights, RANGES, mergeAllHours, hourToolCount,
   filterDaysByRange, rangeCutoffKey, calcStreak, weekTopModels, isoWeekRange, mergeDailyUsage,
+  externalUnitByModel,
   type PricingOpts, type PriceSource, type RangeKey
 } from '../pricing'
 import { MODEL_COLORS, stackBar, donut, legend, dayChart, heatmap, trimNum } from '../charts'
@@ -179,25 +180,23 @@ html.push('<section class="card insights">')
   }
   html.push('</section>')
 
-  /* 本周 Top 模型(U6)。
-     锚点用 pi 侧最后一天：dayModel 只有 pi 有，外部工具只有逐日合计与逐模型合计，
-     没有逐日逐模型，用全工具锚点会算出一个空周。表头与聚合共用 isoWeekRange 且共用
-     同一个 weekAnchor —— 旧稿表头按页面 anchor（10-07）算、数据按 piLast（09-20）算，
-     于是表头写着 10-05~10-07，列的却是 09-15~09-20 的模型，声明了一个没有数据的周。 */
-  const piLast = ((data.days || []) as any[]).map((d: any) => d.d).filter(Boolean).sort().pop() || anchor
-  const weekAnchor = piLast
-  const weekTop = weekTopModels(data, s, weekAnchor)
+/* 本周 Top 模型(U6)。覆盖 pi 与全部外部工具：两侧的 day×model 交叉桶拼在一起
+     * 再排名，外部侧的单价由 externalUnitByModel 一并喂进来 —— 否则那些行会以 $0
+     * 参与排序，而这是一张按费用降序的表。
+     *
+     * 锚点取全库最新日（pi + 外部）。此前锚在 pi 最后一天上，理由是「外部没有逐日
+     * 逐模型」；那个理由已经不成立，留着会让某天只有外部用量的日期被切出窗口 ——
+     * 榜单自称覆盖全部工具，窗口却按其中一个工具定。 */
+  const weekAnchor = anchor
+  const weekTop = weekTopModels(data, s, externalUnitByModel(data, st.policy), weekAnchor)
   const wk = isoWeekRange(weekAnchor)
   const weekStartNote = wk ? wk.start + ' ~ ' + wk.end : ''
   html.push('<section class="card">')
   html.push('<h2>本周 Top 模型 <span class="hint">' +
     esc(weekStartNote || '以数据最大日所在周计') +
-    /* 这一段是真的只有 pi 的逐日逐模型明细，所以「仅 pi 侧」必须留着 ——
-     * 改成「全部工具」就是 §7 铁律 3 的撒谎。但必须同时告诉读者外部工具的用量
-     * 在哪里看，否则整块卡片会让人以为本账本只统计 pi。 */
-    ' · 仅 pi 侧模型（外部工具的用量见下方各工具行） · 按费用降序 · token 精确聚合</span></h2>')
+    ' · 全部工具 · 按费用降序 · token 精确聚合</span></h2>')
   if (!weekTop.length) {
-    html.push('<div class="empty">本周暂无数据 —— dayModel 缺失或该周无用量。</div>')
+    html.push('<div class="empty">本周暂无数据 —— 该周没有逐日逐模型明细。</div>')
   } else {
     const colorIdxMap: Record<string, number> = {}
     ;(data.models || []).map(function (m: any) { return m.key }).sort().forEach(function (k: string, i: number) {

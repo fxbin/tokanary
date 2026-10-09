@@ -350,9 +350,32 @@ export function isoWeekRange(anchor?: string | null): { start: string; end: stri
 /** 数据最大日所在 ISO 周(周一为起点)内 dayModel 聚合,按 cost 降序 Top5。无 dayModel 返回 []。
  *  数据源只有 pi 的 dayModel —— 外部工具只有逐日合计与逐模型合计，没有逐日逐模型，
  *  所以调用方必须把锚点传成 pi 侧最后一天；传全工具锚点会算出一个空周。 */
-export function weekTopModels(data: any, summary: { rows: any[] }, anchor?: string | null): WeekTopRow[] {
-  const dm = data && data.dayModel
-  if (!Array.isArray(dm) || !dm.length) return []
+/** 本周排名的单价格子表形状：模型 key -> $/1M。 */
+export type UnitMap = Record<string, number>
+
+/**
+ * 本周（周一到锚点）按模型排名的**全部工具**明细。
+ *
+ * 覆盖 pi 与每个外部工具：它们的 day×model 交叉桶拼在一起再排名。曾经这个
+ * 区块只有 pi 的数据，于是一个 6 工具的账本摆出一张单工具榜单，还要靠一句
+ * 「外部工具的用量见下方各工具行」把落差解释掉 —— 那不是同一件事，那是一张
+ * 名不副实的榜单。
+ *
+ * `extUnit` 必须一起传进来，否则外部行会以 $0 参与排名：一张按费用降序的表里
+ * 混着 $0 行，排序键等于不存在。
+ */
+export function weekTopModels(
+  data: any,
+  summary: { rows: any[] },
+  extUnit?: UnitMap,
+  anchor?: string | null
+): WeekTopRow[] {
+  const piRows: any[] = Array.isArray(data?.dayModel) ? data.dayModel : []
+  const extRows: any[] = []
+  for (const t of (data?.external?.tools || []) as any[]) {
+    if (Array.isArray(t?.dayModel)) extRows.push(...t.dayModel)
+  }
+  if (!piRows.length && !extRows.length) return []
   const a = anchor || rangeAnchor(data)
   if (!a) return []
   const wk = isoWeekRange(a)
@@ -362,17 +385,25 @@ export function weekTopModels(data: any, summary: { rows: any[] }, anchor?: stri
   ;(summary.rows || []).forEach(function (r: any) {
     if (r.m && r.m.key) unitByKey[r.m.key] = r.unit || 0
   })
+  // pi wins on key collision: both sides price the same canonical id from the
+  // same models.dev table, so a later zero from the external side must not
+  // overwrite a real unit.
+  if (extUnit) {
+    for (const k of Object.keys(extUnit)) {
+      if (!(k in unitByKey)) unitByKey[k] = extUnit[k] || 0
+    }
+  }
   const agg: Record<string, { token: number; cost: number }> = {}
-  dm.forEach(function (x: any) {
-    if (!x || !x.d || x.d < startKey || x.d > a) return
+  for (const x of piRows.concat(extRows)) {
+    if (!x || !x.d || x.d < startKey || x.d > a) continue
     const key = String(x.key || '')
-    if (!key) return
+    if (!key) continue
     let e = agg[key]
     if (!e) e = agg[key] = { token: 0, cost: 0 }
     const tok = Number(x.total) || 0
     e.token += tok
     e.cost += (unitByKey[key] || 0) * tok / 1e6
-  })
+  }
   const rows: WeekTopRow[] = Object.keys(agg).map(function (key) {
     return { key, token: agg[key].token, cost: agg[key].cost, share: 0 }
   }).filter(function (r) { return r.token > 0 || r.cost > 0 })

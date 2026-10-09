@@ -145,13 +145,31 @@ describe('§7.7 定位措辞', () => {
     expect(pages.models).toContain('已匹配单价')
   })
 
-  /* 真的只有 pi 才有的数据，限定词必须留着 —— 删掉它就是撒谎，比措辞偏向
-   * 更严重。所以这两个断言是双向的：既不许抬高 pi，也不许抹掉真实的边界。 */
-  it('仅 pi 才有的区块必须保留限定词，并指明其余工具的用量在哪看', () => {
+  /* 本周 Top 必须真的覆盖全部工具 —— 外部侧现在也带 day×model 交叉桶（74 条，
+   * 实测 5 个外部工具全部有）。这条断言盯的是「名实相符」：榜单自称全部工具，
+   * 数据就必须来自全部工具。
+   *
+   * 同时守住单价：外部行若没喂进 unit，会以 $0 参与「按费用降序」的排序，
+   * 那是一张排序键不存在的表 —— 正是这次修掉的 pi 侧 $0 事故的同一形状。 */
+  it('本周 Top 榜单覆盖全部工具，且没有 $0 行参与费用排序', () => {
     const data = JSON.parse(fs.readFileSync('../.cache/dashboard.json', 'utf8'))
-    const html = renderOverview(data, defaultUiState(), compareSources(data, defaultUiState()), '7d')
-    expect(html).toContain('仅 pi 侧模型')
-    expect(html).toContain('外部工具的用量见下方各工具行')
+    const st = defaultUiState()
+    const html = renderOverview(data, st, compareSources(data, st), '7d')
+    expect(html).toContain('本周 Top 模型')
+    expect(html).toContain('全部工具')
+    expect(html).not.toContain('仅 pi 侧模型')
+
+    // 外部侧确实带了交叉桶，否则这张榜单不可能覆盖全部工具。
+    const ext = ((data as any).external?.tools || []) as any[]
+    const withDm = ext.filter((t) => (t.dayModel || []).length > 0)
+    expect(withDm.length, '没有任何外部工具带 dayModel，榜单名不副实').toBeGreaterThan(0)
+
+    const sec = html.match(/<h2>本周 Top 模型[\s\S]*?<\/section>/)
+    expect(sec).not.toBeNull()
+    // 榜单按费用降序，任何一行报 $0 意味着它的排序键不存在。
+    const costs = (sec![0].match(/week-cost">([^<]*)</g) || []).map((x) => x.slice('week-cost">'.length, -1))
+    expect(costs.length, '榜单一行都没抓到，断言没有意义').toBeGreaterThan(0)
+    for (const c of costs) expect(c, '有行报 $0，说明它的排序键不存在').not.toBe('$0.00')
   })
 
 /* 两个来源的分数不许求和：pi 与外部有同名模型，求和会重复计数（§7.1）。

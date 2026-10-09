@@ -306,6 +306,24 @@ export function compareSources(data: any, opts: PricingOpts) {
 }
 
 /** 其他 CLI(Claude Code / Codex / OpenCode)的汇总与计费 */
+/**
+ * 外部工具按模型的综合单价（$/1M），供 weekTopModels 把外部侧混进同一张榜单。
+ *
+ * 放在这里而不是 range.ts：那个文件刻意不依赖计价核心（见文件头注释），而单价
+ * 必须走 normalizeCost 的缺价策略，两个模块的边界不能为了一个调用点破掉。
+ */
+export function externalUnitByModel(data: any, policy: Policy): Record<string, number> {
+  const out: Record<string, number> = {}
+  const ext = externalSummary(data, policy)
+  for (const r of ((ext as any)?.rows || []) as any[]) {
+    for (const m of r.models || []) {
+      const id = String(m.id || '')
+      if (id && !(id in out)) out[id] = m.unit || 0
+    }
+  }
+  return out
+}
+
 export function externalSummary(data: any, policy: Policy) {
   const ext = data.external
   if (!ext || !ext.tools || !ext.tools.length) return null

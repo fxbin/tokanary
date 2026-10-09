@@ -275,6 +275,7 @@ type ToolAgg struct {
 	Reasoning  int64                `json:"reasoning"`
 	Models     map[string]*ModelAgg `json:"models"`
 	Days       map[string]*ModelAgg `json:"days"`
+	DayModel   map[string]*ModelAgg `json:"dayModel,omitempty"`
 	Hours      map[string]*ModelAgg `json:"hours,omitempty"`
 	FirstTs    string               `json:"firstTs"`
 	LastTs     string               `json:"lastTs"`
@@ -289,20 +290,21 @@ type ToolAgg struct {
 // piece of arithmetic, reached two ways, not two implementations that have to be
 // kept in agreement by hand.
 type accumulator struct {
-	totals   map[string]int64
-	byModel  map[string]*ModelAgg
-	byDay    map[string]*ModelAgg
-	byHour   map[string]*ModelAgg
-	sessions map[string]bool
-	times    []string
-	calls    int
+	totals     map[string]int64
+	byModel    map[string]*ModelAgg
+	byDay      map[string]*ModelAgg
+	byHour     map[string]*ModelAgg
+	byDayModel map[string]*ModelAgg
+	sessions   map[string]bool
+	times      []string
+	calls      int
 }
 
 func newAccumulator() *accumulator {
 	return &accumulator{
 		totals: blankTokens(), byModel: map[string]*ModelAgg{},
 		byDay: map[string]*ModelAgg{}, byHour: map[string]*ModelAgg{},
-		sessions: map[string]bool{},
+		byDayModel: map[string]*ModelAgg{}, sessions: map[string]bool{},
 	}
 }
 
@@ -319,11 +321,32 @@ func (a *accumulator) add(r Record) {
 			day = day[:10]
 		}
 		addTo(a.byDay, day, r)
+		// day×model cross product. pi's warehouse already ships this shape, so
+		// without it the weekly Top list can only cover pi - which is what made a
+		// six-tool ledger present a one-tool ranking.
+		if r.Model != "" {
+			addTo(a.byDayModel, day+dayModelSep+r.Model, r)
+		}
 		a.times = append(a.times, ts)
 		if h := localHourKey(ts); h != "" {
 			addTo(a.byHour, h, r)
 		}
 	}
+}
+
+// dayModelSep joins day and model into one accumulator key. No padding: the
+// key is split back apart by pricing when it is written to the payload, so a
+// stray space would ship as part of the day or the model name.
+const dayModelSep = "\x1f"
+
+// DayModelKeys returns the day×model keys in sorted order.
+func (a *accumulator) DayModelKeys() []string {
+	out := make([]string, 0, len(a.byDayModel))
+	for k := range a.byDayModel {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
 }
 
 // localHourKey buckets a timestamp into `YYYY-MM-DDTHH` **local** time.
@@ -408,7 +431,7 @@ func (a *accumulator) agg(m *Manifest, files int) *ToolAgg {
 		Input: a.totals["input"], CacheRead: a.totals["cacheRead"],
 		CacheWrite: a.totals["cacheWrite"], Output: a.totals["output"],
 		Reasoning: a.totals["reasoning"],
-		Models:    a.byModel, Days: a.byDay, Hours: a.byHour,
+		Models:    a.byModel, Days: a.byDay, Hours: a.byHour, DayModel: a.byDayModel,
 		FirstTs: first, LastTs: last, DedupNote: m.Note, Files: files,
 	}
 }
