@@ -199,6 +199,44 @@ describe('价表新鲜度', () => {
   })
 })
 
+/* 价表键空间：payload.pricing 必须能用 pi 的**规范 key（裸叶名）**查到。
+ *
+ * 价表由 pricing.BuildPricing 原样拷进 payload.pricing，消费方（assemble.go 的
+ * pricing[key]、这里 resolvePrice）一律用裸叶名查。曾经有一次生成价表时把 target
+ * 写成 provider/model，于是每一次查找都落空 —— 面板照常出数，pi 侧的钱全部变成
+ * $0，只剩「已匹配单价 0/15」这个没人会去想的比例。
+ *
+ * 这条断言盯的是症状而不是机制：任何让 pi 模型静默变成 unpriced 的改动都会撞它。
+ */
+describe('价表键空间', () => {
+  it('每个有用量的 pi 模型都必须能在 payload.pricing 里按自己的 key 查到', () => {
+    const data = JSON.parse(fs.readFileSync('../.cache/dashboard.json', 'utf8'))
+    const pricingMap = (data as any).pricing || {}
+    const tableTargets: string[] = Object.keys(pricingMap)
+    expect(tableTargets.length).toBeGreaterThan(0)
+
+    const orphans: string[] = []
+    for (const m of (data as any).models || []) {
+      if (!m.total || m.total <= 0) continue
+      if (!pricingMap[m.key]) orphans.push(m.key)
+    }
+    expect(orphans, '这些 pi 模型在价表里查不到，费用会静默变成 $0：' + orphans.join(', '))
+      .toEqual([])
+  })
+
+  it('价表不得用 provider/model 作 target（消费方按裸叶名查）', () => {
+    const raw = JSON.parse(fs.readFileSync('../.cache/prices-raw.json', 'utf8'))
+    const models = (raw.models || []) as any[]
+    expect(models.length).toBeGreaterThan(0)
+    // 只有两个 provider 撞同一个叶名时才允许带 provider 前缀，那种情况极少见。
+    const prefixed = models.filter((m) => String(m.target).includes('/'))
+    const leaves = models.map((m) => String(m.target).split('/').pop())
+    const dupLeaves = leaves.filter((l, i) => leaves.indexOf(l) !== i)
+    expect(prefixed.length, 'target 带 provider 前缀的条数应等于叶名冲突数')
+      .toBeLessThanOrEqual(new Set(dupLeaves).size)
+  })
+})
+
 describe('总览页同一屏的两份总额', () => {
   it('日序列是全工具合计，热力图 caption 必须点名来源，不得共用「范围内合计」', () => {
     const st = defaultUiState()

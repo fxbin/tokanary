@@ -161,7 +161,15 @@ func buildPriceTable(o priceOpts) (priceBuildResult, error) {
 		row, seen := rows[md.FullID]
 		if !seen {
 			row = &priceRow{
-				target: md.FullID, modelsDevID: md.FullID, provider: md.Provider,
+				// target 必须是**裸叶名**（md.Model），不是 FullID。价表被原样拷进
+				// payload.pricing（pricing.BuildPricing），而消费方一律用 pi 的规范
+				// key（同样是裸叶名）去查：assemble.go 的 pricing[key]、前端的
+				// resolvePrice(key)。写成 provider/model 会让 pi 侧每一次查找都落空，
+				// 于是全部 pi 用量按 $0 计 —— 面板照常出数，只是钱全没了。
+				// 完整目录 id 由 modelsDevID 保留；两个 provider 撞同一个叶名时，
+				// 下面按 provider 加前缀消歧。
+				target:      md.Model,
+				modelsDevID: md.FullID, provider: md.Provider,
 				cost: md.Cost, confidence: pricing.NormalizeConfidence(id, matched, id == md.FullID),
 				sourceURL: md.SourceURL,
 			}
