@@ -117,7 +117,7 @@ describe('§7.5 隐状态绑定 · 审计三问', () => {
 })
 
 describe('总览页同一屏的两份总额', () => {
-  it('日序列是全工具合计，热力图 caption 必须点名 pi 侧，不得共用「范围内合计」', () => {
+  it('日序列是全工具合计，热力图 caption 必须点名来源，不得共用「范围内合计」', () => {
     const st = defaultUiState()
     const data: any = {
       days: [{ d: '2026-09-10', cacheRead: 1, cacheWrite: 0, input: 1, output: 0, total: 2 }],
@@ -132,7 +132,7 @@ describe('总览页同一屏的两份总额', () => {
     for (const c of caps) {
       // 出现「合计」就必须同时出现来源限定；这是 §7.5 问 2 的可执行形式。
       if (c.includes('合计')) {
-        expect(c).toMatch(/pi 侧|全工具/)
+        expect(c).toMatch(/全部工具|pi 侧/)
       }
     }
   })

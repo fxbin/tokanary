@@ -386,6 +386,38 @@ export function weekTopModels(data: any, summary: { rows: any[] }, anchor?: stri
 
 export interface HourRow { h: string; total: number; cacheRead?: number; cacheWrite?: number; input?: number; output?: number }
 
+/**
+ * 合并 pi 侧与全部外部工具的小时桶，供时段热力图使用。
+ *
+ * pi 侧的小时来自仓库（`warehouse.hourExpr` 已按 localtime 换算），外部工具的
+ * 来自适配器记录里的 ISO 时间戳、由 Go 侧 `localHourKey` 统一换算成本地时 ——
+ * 两边的 `h` 因此都是**本地时**的 `YYYY-MM-DDTHH`，可以相加。
+ *
+ * 缺 hours 的工具（sqlite 适配器走 SQL 聚合、codex 走 driver）不贡献任何格，
+ * 而不是贡献一个 0：那会把「本机读不到」画成「那一刻没干活」（§7 铁律 4）。
+ */
+export function mergeAllHours(data: any): HourRow[] {
+  const out: HourRow[] = []
+  const push = (h: string, total: number) => {
+    if (!h || !total) return
+    out.push({ h, total })
+  }
+  for (const x of (data?.hours || []) as HourRow[]) {
+    if (x && x.h) push(String(x.h), Number(x.total) || 0)
+  }
+  for (const t of (data?.external?.tools || []) as any[]) {
+    for (const x of (t?.hours || []) as HourRow[]) {
+      if (x && x.h) push(String(x.h), Number(x.total) || 0)
+    }
+  }
+  return out
+}
+
+/** 有小时粒度的工具数（不含 pi），用于给图注报覆盖范围。 */
+export function hourToolCount(data: any): number {
+  return ((data?.external?.tools || []) as any[]).filter((t) => (t?.hours || []).length > 0).length
+}
+
 /** 按 range 裁剪 hours:取 `h` 前 10 位(YYYY-MM-DD) 走与 days 同一窗口逻辑。 */
 export function filterHoursByRange(hours: HourRow[], range: RangeKey, anchor?: string | null): HourRow[] {
   if (!Array.isArray(hours) || !hours.length) return []

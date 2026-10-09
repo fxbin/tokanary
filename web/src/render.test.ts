@@ -54,7 +54,7 @@ function missingSections(html: string, data: any, range: RangeKey): string[] {
   // hint-qualified ones, so a word appearing in prose cannot satisfy them.
   const markers = [
     '模型 Token 构成', '模型费用占比', '模型明细与单价',
-    '<h2>洞察', '本周 Top 模型', 'pi 侧时段热力图', '跨工具总览', '项目归因',
+    '<h2>洞察', '本周 Top 模型', '时段热力图', '跨工具总览', '项目归因',
     '>' + RANGES[range].label + ' 会话 ', '价格设置',
     'data-field="cache_read"', '<svg'
   ]
@@ -147,8 +147,14 @@ suite('总览：同一笔钱不得加自己', () => {
   it('不再出现与「{范围}费用」重复的「{范围}全部工具」KPI', () => {
     for (const range of ['all', '30d', '7d'] as RangeKey[]) {
       const html = overview(range)
-      expect(html).not.toContain('全部工具')
-      expect(html).not.toContain(RANGES[range].label + '全部工具')
+      // 断言收窄到 KPI 条这一段：它防的是「同屏两个总额」，具体形态就是顶部
+      // 多出一格重复的钱。整页一刀切会连带禁止图注里的来源自述 —— 而那正是
+      // §7.5 要求的「这个数是谁的子集」。护栏该守的地方要守住，不该把正文
+      // 也一并封掉。
+      const kpis = html.match(/<section class="kpis">[\s\S]*?<\/section>/)
+      expect(kpis).not.toBeNull()
+      expect(kpis![0]).not.toContain('全部工具')
+      expect(kpis![0]).not.toContain(RANGES[range].label + '全部工具')
     }
   })
 

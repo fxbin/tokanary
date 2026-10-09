@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"sort"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -274,6 +275,7 @@ type ToolAgg struct {
 	Reasoning  int64                `json:"reasoning"`
 	Models     map[string]*ModelAgg `json:"models"`
 	Days       map[string]*ModelAgg `json:"days"`
+	Hours      map[string]*ModelAgg `json:"hours,omitempty"`
 	FirstTs    string               `json:"firstTs"`
 	LastTs     string               `json:"lastTs"`
 	DedupNote  string               `json:"dedupNote"`
@@ -290,6 +292,7 @@ type accumulator struct {
 	totals   map[string]int64
 	byModel  map[string]*ModelAgg
 	byDay    map[string]*ModelAgg
+	byHour   map[string]*ModelAgg
 	sessions map[string]bool
 	times    []string
 	calls    int
@@ -298,7 +301,8 @@ type accumulator struct {
 func newAccumulator() *accumulator {
 	return &accumulator{
 		totals: blankTokens(), byModel: map[string]*ModelAgg{},
-		byDay: map[string]*ModelAgg{}, sessions: map[string]bool{},
+		byDay: map[string]*ModelAgg{}, byHour: map[string]*ModelAgg{},
+		sessions: map[string]bool{},
 	}
 }
 
@@ -316,7 +320,46 @@ func (a *accumulator) add(r Record) {
 		}
 		addTo(a.byDay, day, r)
 		a.times = append(a.times, ts)
+		if h := localHourKey(ts); h != "" {
+			addTo(a.byHour, h, r)
+		}
 	}
+}
+
+// localHourKey buckets a timestamp into `YYYY-MM-DDTHH` **local** time.
+//
+// The day bucket above is deliberately left alone: it slices the source's own
+// string, so daily totals keep the exact keys they have always had. Hour
+// buckets cannot do that, because the hour-of-day axis only means something once
+// it is converted — an adapter's ISO stamps end in `Z` (UTC), while pi's hours
+// come out of SQLite already in localtime (`warehouse.hourExpr`). Merging the
+// two without converting would produce a matrix whose columns are half UTC and
+// half local, which is not a heatmap of anything.
+//
+// Timestamps that carry no explicit offset are read as wall-clock local, which
+// is what a source writing bare `YYYY-MM-DDTHH:MM:SS` means by them.
+func localHourKey(ts string) string {
+	if len(ts) < 13 {
+		return ""
+	}
+	if strings.HasSuffix(ts, "Z") || hasOffset(ts) {
+		if t, err := time.Parse(time.RFC3339Nano, ts); err == nil {
+			return t.Local().Format("2006-01-02T15")
+		}
+		// A stamp we cannot parse as RFC3339 is still a stamp; fall through to
+		// the wall-clock reading rather than dropping the record from hours.
+	}
+	return ts[:13]
+}
+
+// hasOffset reports whether an ISO timestamp ends in a numeric UTC offset
+// (`+08:00`) rather than `Z` or nothing at all.
+func hasOffset(ts string) bool {
+	if len(ts) < 6 {
+		return false
+	}
+	tail := ts[len(ts)-6:]
+	return (tail[0] == '+' || tail[0] == '-') && tail[3] == ':'
 }
 
 func tokenOf(r Record, key string) int64 {
@@ -365,7 +408,7 @@ func (a *accumulator) agg(m *Manifest, files int) *ToolAgg {
 		Input: a.totals["input"], CacheRead: a.totals["cacheRead"],
 		CacheWrite: a.totals["cacheWrite"], Output: a.totals["output"],
 		Reasoning: a.totals["reasoning"],
-		Models:    a.byModel, Days: a.byDay,
+		Models:    a.byModel, Days: a.byDay, Hours: a.byHour,
 		FirstTs: first, LastTs: last, DedupNote: m.Note, Files: files,
 	}
 }

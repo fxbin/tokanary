@@ -2,7 +2,7 @@ import {
   fmt, money, pct, CATS, POLICIES, SOURCES,
   normalizeCost, costOfTokens, computeAll, compareSources,
   dailyCost, externalSummary, rangeStats, rangeExt, rangeAnchor, withMergedDays, mergeDailyCost,
-  filterHoursByRange, hourMatrix, rangeInsights, RANGES,
+  filterHoursByRange, hourMatrix, rangeInsights, RANGES, mergeAllHours, hourToolCount,
   filterDaysByRange, rangeCutoffKey, calcStreak, weekTopModels, isoWeekRange, mergeDailyUsage,
   type PricingOpts, type PriceSource, type RangeKey
 } from '../pricing'
@@ -10,8 +10,8 @@ import { MODEL_COLORS, stackBar, donut, legend, dayChart, heatmap, trimNum } fro
 import { windowUsage, type WindowUsage } from '../usage'
 import { th, sourceTag, stableColorIndex, sesRecency, pad2, localDay, esc, type UiState } from './shared'
 
-/** 时段热力格的来源自述。只有 pi 侧有 hours 粒度，这一句是这个矩阵唯一的口径声明（§7.5）。 */
-export const HEATMAP_SOURCE_LABEL = 'pi 侧小时粒度'
+/** 时段热力格的来源自述。覆盖全部有小时粒度的工具（§7.5）。 */
+export const HEATMAP_SOURCE_LABEL = '全部工具 · 本地时'
 
 export function renderOverview(data: any, st: UiState, cmp: Record<string, number>, range: RangeKey): string {
   if (!data) {
@@ -216,14 +216,18 @@ html.push('<section class="card insights">')
   }
   html.push('</section>')
 
-  /* 时段热力格:weekday × hour,消费 hours 契约;缺 hours 时降级文案。
-   * 只有 pi 侧有 hours 粒度(外部 CLI 是逐日的),所以这个矩阵覆盖不到同屏
-   * dayChart 的全工具合计 —— 标题与 caption 都必须把这件事说出来(§7.5)。 */
-  const rangeHours = filterHoursByRange((data.hours || []) as any, range, rangeAnchor(data))
+  /* 时段热力格:weekday × hour。覆盖 **pi 与全部有小时粒度的外部工具** ——
+   适配器记录里带的是完整 ISO 时间戳，小时一直在，只是过去没人去读（曾经
+   DESIGN.md 写着「外部 CLI 只有逐日粒度」，那是把「我们只聚合到日」当成了
+   数据的事实）。缺 hours 的工具不贡献格，而不是贡献一个 0（§7 铁律 4）。 */
+  const allHours = mergeAllHours(data)
+  const rangeHours = filterHoursByRange(allHours, range, rangeAnchor(data))
+  const extHourTools = hourToolCount(data)
   html.push('<section class="card">')
-  html.push('<h2>pi 侧时段热力图 <span class="hint">星期 × 小时 · 格色 = token 强度 · ' +
-    '仅 pi 侧有小时粒度，外部工具按日统计、不在本图内 · 鼠标悬停看该格明细</span></h2>')
-  if (!(data.hours || []).length) {
+  html.push('<h2>时段热力图 <span class="hint">星期 × 小时 · 格色 = token 强度 · ' +
+    '全部工具本地时合计' + (extHourTools > 0 ? '（pi + ' + extHourTools + ' 个外部工具）' : '（仅 pi）') +
+    ' · 无小时粒度的工具按日统计、不在本图内 · 鼠标悬停看该格明细</span></h2>')
+  if (!allHours.length) {
     html.push('<div class="empty">重新跑 tokanary refresh 获取小时粒度（仓库需含 hours 字段）。</div>')
   } else {
     html.push(heatmap(hourMatrix(rangeHours), { sourceLabel: HEATMAP_SOURCE_LABEL }))

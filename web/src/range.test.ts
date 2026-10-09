@@ -13,6 +13,7 @@ import { externalModelRows } from './render/models'
 import { BUDGET_SCOPE_LABEL } from './render/projects'
 import { useHashRoute } from './composables/useHashRoute'
 import { heatmap, MODEL_COLORS } from './charts'
+import { mergeAllHours, hourToolCount } from './pricing'
 import { CATS } from './pricing'
 import { mergeDailyUsage } from './range'
 import { loadDashboardFixture } from './testsupport'
@@ -142,6 +143,43 @@ describe('U2 hours heatmap', () => {
     expect(sum).toBe(650) // 100+50+200+300
   })
 
+  /* 时段热力图覆盖全部工具：pi 侧的 hours 加上每个外部工具自己的 hours。
+   * 曾有一版规范写着「外部 CLI 只有逐日粒度」，那是把「我们只聚合到日」当成了
+   * 数据的事实 —— 实际上 5 个外部工具全部带小时级时间戳。 */
+  it('mergeAllHours: 合并 pi 与全部外部工具的小时桶', () => {
+    const data: any = {
+      hours: [{ h: '2026-09-10 05', total: 7 }],
+      external: {
+        tools: [
+          { tool: 'a', hours: [{ h: '2026-09-10T06', total: 3 }] },
+          { tool: 'b', hours: [{ h: '2026-09-10T07', total: 5 }] },
+          { tool: 'no-hours', days: [{ d: '2026-09-10' }] }
+        ]
+      }
+    }
+    const merged = mergeAllHours(data)
+    expect(merged).toHaveLength(3)
+    expect(merged.reduce((t, x) => t + x.total, 0)).toBe(15)
+    // 两个键格式不同（空格 vs T），但日期段都在前 10 位，hourMatrix 的切片照样对。
+    const m = hourMatrix(merged)
+    const total = m.flat().reduce((t, v) => t + v, 0)
+    expect(total).toBe(15)
+    expect(hourToolCount(data)).toBe(2) // 'no-hours' 不算
+    expect(mergeAllHours(null)).toEqual([])
+    expect(mergeAllHours({})).toEqual([])
+    expect(hourToolCount({})).toBe(0)
+  })
+
+  /* 零桶不得凭空出现：total 为 0 的行不进矩阵，否则「没活动」会被画成和
+   * 「没数据」同一格（§7 铁律 4）。 */
+  it('mergeAllHours: 跳过零与缺 h 的行', () => {
+    const merged = mergeAllHours({
+      hours: [{ h: '2026-09-10 05', total: 0 }],
+      external: { tools: [{ tool: 'a', hours: [{ h: '', total: 9 }, { h: '2026-09-10T06', total: 0 }] }] }
+    })
+    expect(merged).toEqual([])
+  })
+
   it('filterHoursByRange: 按日期裁剪到 range 窗口', () => {
     const hours = hourFixture().hours
     const anchor = '2026-09-10'
@@ -155,17 +193,17 @@ describe('U2 hours heatmap', () => {
 
   it('heatmap: 有数据出 SVG;caption 自报来源与格数;全 0/空出降级文案', () => {
     const m = hourMatrix(hourFixture().hours)
-    const html = heatmap(m, { sourceLabel: 'pi 侧小时粒度' })
+    const html = heatmap(m, { sourceLabel: '全部工具 · 本地时' })
     expect(html).toContain('<svg')
     expect(html).toContain('heatmap')
     // §7.5：这个合计覆盖不到同屏 dayChart 的全工具数，所以必须点名来源；
     // 旧文案「范围内合计」与 dayChart 共用一个词，且把格数说成「小时」。
-    expect(html).toContain('pi 侧小时粒度')
+    expect(html).toContain('全部工具 · 本地时')
     expect(html).toContain('/ 168 格非零')
     expect(html).not.toContain('范围内合计')
-    const empty = heatmap([], { sourceLabel: 'pi 侧小时粒度' })
+    const empty = heatmap([], { sourceLabel: '全部工具 · 本地时' })
     expect(empty).toContain('tokanary refresh')
-    const zero = heatmap(new Array(7).fill(null).map(() => new Array(24).fill(0)), { sourceLabel: 'pi 侧小时粒度' })
+    const zero = heatmap(new Array(7).fill(null).map(() => new Array(24).fill(0)), { sourceLabel: '全部工具 · 本地时' })
     expect(zero).toContain('tokanary refresh')
   })
 
@@ -209,13 +247,18 @@ describe('U2 hours heatmap', () => {
     const html = renderOverview(DATA, st, cmp, 'all')
     // 标题必须点名来源：只有 pi 侧有 hours 粒度，不点名就与同屏 dayChart 的
     // 全工具合计共用一个「总量」的读法（§7.5）。
-    expect(html).toContain('pi 侧时段热力图')
-    expect(html).toContain('仅 pi 侧有小时粒度')
+    expect(html).toContain('时段热力图')
+    expect(html).toContain('全部工具本地时合计')
     expect(html).toContain('洞察')
     expect(html).toContain('月末预测')
     expect(html).not.toMatch(/NaN/)
-    // 无 hours 的降级
-    const noH = { ...DATA, hours: undefined }
+    // 无 hours 的降级。小时现在来自 pi 与全部外部工具，所以降级条件是
+    // 「所有来源都没有 hours」，而不是只看 payload.hours。
+    const noH = {
+      ...DATA,
+      hours: undefined,
+      external: { tools: ((DATA as any).external?.tools || []).map((t: any) => ({ ...t, hours: undefined })) }
+    }
     const html2 = renderOverview(noH, st, cmp, 'all')
     expect(html2).toContain('tokanary refresh')
   })
