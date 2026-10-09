@@ -233,12 +233,38 @@ export function dayChart(days: DayRow[], costByDay: Record<string, number>): str
   return out.join('')
 }
 
+/** 离散量级阶梯的五档。空格占第 0 档，必须比最弱数据格更轻。 */
+const HM_TONES = ['var(--hm-0)', 'var(--hm-1)', 'var(--hm-2)', 'var(--hm-3)', 'var(--hm-4)']
+
 /**
- * weekday×hour 活动热力格(7 行 × 24 列)。matrix[w][h]=token;全 0 或空返回降级提示。
+ * 把一个值落进五档。阈值取 sqrt 后的 0.25 / 0.5 / 0.75 ——
  *
- * `sourceLabel` 是这个矩阵的来源自述，**必填且不许传空**：只有 pi 侧有 hours
- * 粒度，外部 CLI 是逐日的，所以这个合计覆盖不到同屏 dayChart 的全工具数。
- * 沿用旧文案「范围内合计 X」会让两个不同口径的数共用一个词 —— §7 铁律 2。
+ * **为什么离散而不是连续**：连续的 sqrt 透明度在用 19 天、每格 2–3 次观测的
+ * 数据去声称一个连续的周节律。分档之后图上只承诺「落在哪一档」。
+ * **为什么不是按秩**：按秩（分位数）会让同一个绝对值在切范围时换档，读者没法
+ * 把这周的格子和上周的格子放在一起比。相对 max 的分档不稳定，但 caption 与图例
+ * 都写出绝对端点，锚点跟着走。
+ */
+export function heatTone(v: number, max: number): number {
+  if (!(v > 0)) return 0
+  if (!(max > 0)) return 0
+  const r = Math.sqrt(v / max)
+  if (r <= 0.25) return 1
+  if (r <= 0.5) return 2
+  if (r <= 0.75) return 3
+  return 4
+}
+
+/**
+ * weekday×hour 时段热力格(7 行 × 24 列)。matrix[w][h]=token;全 0 或空返回降级提示。
+ *
+ * `sourceLabel` 是这个矩阵的来源自述，**必填且不许传空**：它点明这个合计覆盖
+ * 哪些来源，沿用旧文案「范围内合计 X」会让不同口径的数共用一个词（§7.2）。
+ *
+ * 可达性：整图是 **一个** tab stop（摘要），峰值格是第二个。不是 168 个 ——
+ * 一格一个 tab stop 会把键盘用户困在图里出不来（Nielsen：可达性是结构依赖，
+ * 格数只决定查找成本）。颜色之外另有一条通道：图例给出两端的绝对值，caption
+ * 给出峰值时刻与最大值，所以不靠颜色也能读出量级。
  */
 export function heatmap(
   matrix: number[][],
@@ -251,10 +277,12 @@ export function heatmap(
   let max = 0
   let sum = 0
   let nonzero = 0
+  let peakW = -1
+  let peakH = -1
   if (rows) {
-    rows.forEach(function (r) {
-      r.forEach(function (v) {
-        if (v > max) max = v
+    rows.forEach(function (r, w) {
+      r.forEach(function (v, h) {
+        if (v > max) { max = v; peakW = w; peakH = h }
         sum += v
         if (v > 0) nonzero++
       })
@@ -269,7 +297,13 @@ export function heatmap(
   const cell = 28, gap = 3, padL = 36, padT = 22, padB = 8, padR = 8
   const w = padL + 24 * (cell + gap) + padR
   const h = padT + 7 * (cell + gap) + padB
-  const out = ['<svg viewBox="0 0 ' + w + ' ' + h + '" class="chart heatmap" preserveAspectRatio="xMidYMid meet">']
+  const total = rows.length * 24
+  const peakLabel = '周' + WAYS[peakW] + ' ' + String(peakH).padStart(2, '0') + ':00'
+  const summary = opts.sourceLabel + ' · 时段热力图：' + nonzero + ' / ' + total +
+    ' 格非零，峰值 ' + peakLabel + ' ' + fmt(max) + ' token'
+
+  const out = ['<svg viewBox="0 0 ' + w + ' ' + h + '" class="chart heatmap" preserveAspectRatio="xMidYMid meet"' +
+    ' role="img" tabindex="0" aria-label="' + esc(summary) + '">']
   for (let hr = 0; hr < 24; hr += 3) {
     const x = padL + hr * (cell + gap) + cell / 2
     out.push('<text x="' + x.toFixed(1) + '" y="' + (padT - 8) + '" text-anchor="middle" class="axis">' +
@@ -282,20 +316,34 @@ export function heatmap(
     for (let hr = 0; hr < 24; hr++) {
       const v = matrix[wd][hr] || 0
       const x = padL + hr * (cell + gap)
-      const op = v > 0 ? (0.18 + 0.82 * Math.sqrt(v / max)) : 0
-      const fill = v > 0 ? 'var(--accent)' : 'var(--line)'
-      const title = WAYS[wd] + ' ' + String(hr).padStart(2, '0') + ':00 · ' + fmt(v) + ' token'
+      const tone = heatTone(v, max)
+      const label = WAYS[wd] + ' ' + String(hr).padStart(2, '0') + ':00 · ' + fmt(v) + ' token'
+      // 峰值格给第二个 tab stop，其余格不进 Tab 序列：读者要的是「最忙的那一格」，
+      // 不是「用 Tab 走完 168 格」。
+      const focus = wd === peakW && hr === peakH
+        ? ' tabindex="0" role="img" aria-label="峰值格 ' + esc(label) + '"'
+        : ' aria-hidden="true"'
       out.push('<rect x="' + x + '" y="' + y + '" width="' + cell + '" height="' + cell +
-        '" rx="4" fill="' + fill + '" opacity="' + (v > 0 ? op.toFixed(3) : '0.35') +
-        '"><title>' + esc(title) + '</title></rect>')
+        '" rx="4" fill="' + HM_TONES[tone] + '"' + focus +
+        '><title>' + esc(label) + '</title></rect>')
     }
   }
   out.push('</svg>')
-  /* 默认 caption 必须自带来源与格数口径。旧的「N 个活跃小时格」把格数说成
-   * 「小时」—— 那是 168 格矩阵里的非空格数，不是活跃小时数（§7 铁律 3）。 */
+
+  /* 图例：颜色之外的第二条通道。两端给绝对值，中间不写「强度」这种没有锚点的词。 */
+  const legend = '<div class="hm-legend dim small" aria-hidden="true">' +
+    '<span class="hm-key">低</span>' +
+    HM_TONES.map(function (t) { return '<i class="hm-sw" style="background:' + t + '"></i>' }).join('') +
+    '<span class="hm-key">高</span>' +
+    '<span class="hm-anchor">峰值 ' + esc(peakLabel) + ' · ' + fmt(max) + ' token</span>' +
+    '</div>'
+
+  /* caption 必须自带来源与格数口径。旧的「N 个活跃小时格」把格数说成「小时」 ——
+   * 那是 168 格矩阵里的非空格数，不是活跃小时数（§7.3）。 */
   const cap = opts.caption || (
     (opts.sourceLabel ? opts.sourceLabel + ' · ' : '') +
-    '合计 ' + fmt(sum) + ' token · ' + nonzero + ' / ' + (rows.length * 24) + ' 格非零'
+    '合计 ' + fmt(sum) + ' token · ' + nonzero + ' / ' + total + ' 格非零 · 峰值 ' +
+    esc(peakLabel) + ' ' + fmt(max) + ' token'
   )
-  return out + '<div class="hm-cap dim small">' + esc(cap) + '</div>'
+  return out + legend + '<div class="hm-cap dim small">' + esc(cap) + '</div>'
 }
