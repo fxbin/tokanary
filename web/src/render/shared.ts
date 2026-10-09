@@ -6,7 +6,7 @@ import {
   filterDaysByRange, rangeCutoffKey, calcStreak, weekTopModels,
   type PricingOpts, type PriceSource, type RangeKey
 } from '../pricing'
-import { MODEL_COLORS, stackBar, donut, legend, dayChart, heatmap, trimNum } from '../charts'
+import { MODEL_COLORS, stackBar, donut, legend, dayChart, trimNum } from '../charts'
 
 /**
  * esc():HTML 转义之前先洗掉 U+FFFD 替换字符。
@@ -27,6 +27,8 @@ export interface UiState extends PricingOpts {
   sesSortDir: number
   drillProject: string | null
   budgetUsd: number
+  /** 「重置价格」刚清空掉的覆盖条数，>0 时设置页显示撤销入口。非持久化。 */
+  undoPendingCount: number
 }
 
 export function defaultUiState(): UiState {
@@ -34,7 +36,7 @@ export function defaultUiState(): UiState {
     policy: 'ratio10', priceSource: 'modelsdev', overrides: {}, customPrices: null,
     sortKey: 'total', sortDir: -1,
     sesQuery: '', sesSortKey: 'updatedAt', sesSortDir: -1,
-    drillProject: null, budgetUsd: 0
+    drillProject: null, budgetUsd: 0, undoPendingCount: 0
   }
 }
 

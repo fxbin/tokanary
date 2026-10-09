@@ -233,10 +233,20 @@ export function dayChart(days: DayRow[], costByDay: Record<string, number>): str
   return out.join('')
 }
 
-/** weekday×hour 活动热力格(7 行 × 24 列)。matrix[w][h]=token;全 0 或空返回降级提示。
- *  `emptyText`:全 0 有两种成因 —— 仓库根本没有小时粒度,或窗口内没有。图表层只看得到
- *  一张全 0 矩阵,分不清是哪种,所以由调用方(知道全量与范围两份数据)传入准确说法。 */
-export function heatmap(matrix: number[][], opts: { caption?: string; emptyText?: string } = {}): string {
+/**
+ * weekday×hour 活动热力格(7 行 × 24 列)。matrix[w][h]=token;全 0 或空返回降级提示。
+ *
+ * `sourceLabel` 是这个矩阵的来源自述，**必填且不许传空**：只有 pi 侧有 hours
+ * 粒度，外部 CLI 是逐日的，所以这个合计覆盖不到同屏 dayChart 的全工具数。
+ * 沿用旧文案「范围内合计 X」会让两个不同口径的数共用一个词 —— §7 铁律 2。
+ */
+export function heatmap(
+  matrix: number[][],
+  opts: { caption?: string; emptyText?: string; sourceLabel: string }
+): string {
+  // 签名要求是一层，运行时空标签也必须挡住：漏传会得到一张没有口径声明的图，
+  // 而这正是本项目踩过的坑（数字被当成全量）。宁可不出图。
+  if (!opts || !opts.sourceLabel) return ''
   const rows = matrix && matrix.length === 7 ? matrix : null
   let max = 0
   let sum = 0
@@ -251,7 +261,9 @@ export function heatmap(matrix: number[][], opts: { caption?: string; emptyText?
     })
   }
   if (!rows || !nonzero || !max) {
-    return '<div class="empty">' + (opts.emptyText || '暂无小时粒度数据 —— 重新跑 tokanary refresh 获取小时粒度后可见热力图。') + '</div>'
+    return '<div class="empty">' +
+      (opts.sourceLabel ? esc(opts.sourceLabel) + '暂无小时粒度数据' : '暂无小时粒度数据') +
+      ' —— 重新跑 tokanary refresh 获取小时粒度后可见热力图。</div>'
   }
   const WAYS = ['日', '一', '二', '三', '四', '五', '六']
   const cell = 28, gap = 3, padL = 36, padT = 22, padB = 8, padR = 8
@@ -279,6 +291,11 @@ export function heatmap(matrix: number[][], opts: { caption?: string; emptyText?
     }
   }
   out.push('</svg>')
-  const cap = opts.caption || ('范围内合计 ' + fmt(sum) + ' token · ' + nonzero + ' 个活跃小时格')
+  /* 默认 caption 必须自带来源与格数口径。旧的「N 个活跃小时格」把格数说成
+   * 「小时」—— 那是 168 格矩阵里的非空格数，不是活跃小时数（§7 铁律 3）。 */
+  const cap = opts.caption || (
+    (opts.sourceLabel ? opts.sourceLabel + ' · ' : '') +
+    '合计 ' + fmt(sum) + ' token · ' + nonzero + ' / ' + (rows.length * 24) + ' 格非零'
+  )
   return out + '<div class="hm-cap dim small">' + esc(cap) + '</div>'
 }

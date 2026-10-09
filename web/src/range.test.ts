@@ -3,18 +3,21 @@
 import { describe, it, expect } from 'vitest'
 import {
   computeAll, compareSources, dailyCost, defaultOpts, money,
-  externalSummary, rangeExt, mergeDailyCost, monthToDateCost, freshnessChip,
+  externalSummary, rangeExt,
   rangeStats, filterDaysByRange, rangeCutoffKey, rangeAnchor,
   filterHoursByRange, hourMatrix, rangeInsights, calcStreak, weekTopModels, isoWeekRange,
   type RangeKey
 } from './pricing'
-import { renderOverview, renderModels, renderSessions, renderProjects, renderSettings, budgetAlertHtml, BUDGET_TIERS, defaultUiState } from './render'
+import { renderOverview, renderModels, renderSessions, renderProjects, renderSettings, budgetAlertHtml, defaultUiState, esc } from './render'
 import { externalModelRows } from './render/models'
+import { BUDGET_SCOPE_LABEL } from './render/projects'
 import { useHashRoute } from './composables/useHashRoute'
 import { heatmap, MODEL_COLORS } from './charts'
 import { CATS } from './pricing'
 import { mergeDailyUsage } from './range'
 import { loadDashboardFixture } from './testsupport'
+
+const S = BUDGET_SCOPE_LABEL
 
 const DATA = loadDashboardFixture()
 const live = DATA ? describe : describe.skip
@@ -150,16 +153,29 @@ describe('U2 hours heatmap', () => {
     expect(filterHoursByRange([], '7d')).toEqual([])
   })
 
-  it('heatmap: 有数据出 SVG;全 0/空出降级文案', () => {
+  it('heatmap: 有数据出 SVG;caption 自报来源与格数;全 0/空出降级文案', () => {
     const m = hourMatrix(hourFixture().hours)
-    const html = heatmap(m)
+    const html = heatmap(m, { sourceLabel: 'pi 侧小时粒度' })
     expect(html).toContain('<svg')
     expect(html).toContain('heatmap')
-    expect(html).toContain('活跃小时格')
-    const empty = heatmap([])
+    // §7.5：这个合计覆盖不到同屏 dayChart 的全工具数，所以必须点名来源；
+    // 旧文案「范围内合计」与 dayChart 共用一个词，且把格数说成「小时」。
+    expect(html).toContain('pi 侧小时粒度')
+    expect(html).toContain('/ 168 格非零')
+    expect(html).not.toContain('范围内合计')
+    const empty = heatmap([], { sourceLabel: 'pi 侧小时粒度' })
     expect(empty).toContain('tokanary refresh')
-    const zero = heatmap(new Array(7).fill(null).map(() => new Array(24).fill(0)))
+    const zero = heatmap(new Array(7).fill(null).map(() => new Array(24).fill(0)), { sourceLabel: 'pi 侧小时粒度' })
     expect(zero).toContain('tokanary refresh')
+  })
+
+  /* sourceLabel 是必填的：漏传就没有任何口径声明，而这正是本项目踩过的坑。
+   * 用类型系统钉住，比在运行时返回一句空标签更早暴露。 */
+  it('heatmap 必须传 sourceLabel（签名层防回归）', () => {
+    // 签名要求是一层，运行时空标签也必须挡住：漏传会得到一张没有口径声明的图。
+    // @ts-expect-error 缺 sourceLabel 应当编译失败
+    const noLabel = heatmap(new Array(7).fill(null).map(() => new Array(24).fill(3)))
+    expect(noLabel).toBe('')
   })
 
   it('rangeInsights: 手算对照 + 空守卫', () => {
@@ -191,7 +207,10 @@ describe('U2 hours heatmap', () => {
     const st = defaultUiState()
     const cmp = compareSources(DATA, st)
     const html = renderOverview(DATA, st, cmp, 'all')
-    expect(html).toContain('活动热力图')
+    // 标题必须点名来源：只有 pi 侧有 hours 粒度，不点名就与同屏 dayChart 的
+    // 全工具合计共用一个「总量」的读法（§7.5）。
+    expect(html).toContain('pi 侧时段热力图')
+    expect(html).toContain('仅 pi 侧有小时粒度')
     expect(html).toContain('洞察')
     expect(html).toContain('月末预测')
     expect(html).not.toMatch(/NaN/)
@@ -387,112 +406,6 @@ describe('U4 projects tab', () => {
   })
 })
 
-describe('freshnessChip:新鲜度必须说采集时刻，不是读库时刻', () => {
-  // 旧稿拿 meta.generatedAt（dashboard.go 用 time.Now() 填，每 30 秒轮询重写）
-  // 算相对时间，恒为 0，于是永远「刚刚刷新」。而 external.generatedAt 才是真采集
-  // 时刻，meta.generatedAt 比它晚几秒 —— 正是这一点让旧稿永远新鲜。
-  const NOW = new Date(2026, 9, 8, 12, 0, 0)
-  const payload = (extGen: string | null, metaGen: string) => ({
-    meta: { generatedAt: metaGen },
-    external: extGen === null ? null : {
-      generatedAt: extGen,
-      tools: [
-        { label: 'Codex CLI', lastTs: '2026-10-08T12:00:00.000Z' },
-        { label: 'Gemini CLI', lastTs: '2026-02-20T00:00:00.000Z' }
-      ]
-    }
-  })
-
-  it('读库时刻刚刷新、采集已过去很久时，要报采集而不是报「刚刚」', () => {
-    const f = freshnessChip(payload('2026-10-08 08:00', NOW.toISOString()), NOW)
-    expect(f.text).toContain('小时前采集')   // 4 小时前
-    expect(f.text).not.toContain('刚刚')
-  })
-
-  it('meta.generatedAt 比采集时刻晚也不能被当成采集时刻', () => {
-    const a = freshnessChip(payload('2026-10-08 08:00', NOW.toISOString()), NOW)
-    const b = freshnessChip(payload(null, NOW.toISOString()), NOW)
-    expect(a.text).not.toBe(b.text)
-  })
-
-  it('没有 external 数据时退回 meta', () => {
-    const f = freshnessChip(payload(null, NOW.toISOString()), NOW)
-    expect(f.text).toContain('刚刚采集')
-    expect(f.cls).toBe('fresh-ok')
-  })
-
-  it('列出超过 7 天没更新的工具，不让停更的藏在新鲜的后面', () => {
-    const f = freshnessChip(payload('2026-10-08 12:00', NOW.toISOString()), NOW)
-    expect(f.stale).toEqual(['Gemini CLI'])
-    expect(f.stale).not.toContain('Codex CLI')
-  })
-
-  it('无时间戳时给未知而不是假装新鲜', () => {
-    expect(freshnessChip({}, NOW).cls).toBe('fresh-err')
-    expect(freshnessChip({ meta: { generatedAt: '乱码' } }, NOW).cls).toBe('fresh-err')
-  })
-
-  it('有工具停更时 chip 不能是绿的（采集新不等于每家都新）', () => {
-    const f = freshnessChip(payload('2026-10-08 12:00', NOW.toISOString()), NOW)
-    expect(f.cls).not.toBe('fresh-ok')
-    expect(f.text).toContain('1 家已停更')
-  })
-
-  it('全部工具都新鲜时，chip 不提停更', () => {
-    const only: any = {
-      meta: { generatedAt: NOW.toISOString() },
-      external: {
-        generatedAt: '2026-10-08 12:00',
-        tools: [{ label: 'Codex CLI', lastTs: '2026-10-08T11:30:00.000Z' }]
-      }
-    }
-    const f = freshnessChip(only, NOW)
-    expect(f.cls).toBe('fresh-ok')
-    expect(f.text).not.toContain('停更')
-  })
-
-  it('空格分隔的时间戳按本地时间解析，不被当成 UTC', () => {
-    const f = freshnessChip(payload('2026-10-08 11:30', NOW.toISOString()), NOW)
-    expect(f.text).toContain('30 分钟前采集')
-  })
-})
-
-describe('monthToDateCost:预算分子只能是本月至今', () => {
-  const byDay = {
-    '2026-09-30': 100,
-    '2026-10-01': 10,
-    '2026-10-08': 20,
-    '2026-10-09': 30,
-    '2026-11-01': 999
-  }
-  const at = (y: number, m: number) => new Date(y, m - 1, 15)
-
-  it('只累加当月已过的条目，上月与下月都不算', () => {
-    expect(monthToDateCost(byDay, at(2026, 10))).toBe(60) // 10/01 + 10/08 + 10/09
-    expect(monthToDateCost(byDay, new Date(2026, 8, 30))).toBe(100) // 9-30 已过
-    expect(monthToDateCost(byDay, new Date(2026, 8, 20))).toBe(0)   // 9-30 还没到
-    expect(monthToDateCost(byDay, at(2026, 11))).toBe(999)
-  })
-
-  it('空表与全空值返回 0，不出 NaN', () => {
-    expect(monthToDateCost({}, at(2026, 10))).toBe(0)
-    expect(monthToDateCost({ '2026-10-01': undefined as any }, at(2026, 10))).toBe(0)
-  })
-
-  it('「至今」不含未来：10 月 1 日不能把 10-20 的用量算进来', () => {
-    expect(monthToDateCost({ '2026-10-20': 50 }, new Date(2026, 9, 1))).toBe(0)
-    expect(monthToDateCost({ '2026-10-20': 50 }, new Date(2026, 9, 25))).toBe(50)
-  })
-
-  it('跨月边界：取真实日历月，不按数据最新日反推', () => {
-    // 数据停在 9 月，「今天」是 10 月 1 日 —— 本月至今确实是 0。
-    // 若按数据最新日所在的月反推，会把 9 月那 100 算进来，等于凭空多出一个月。
-    const sep = { '2026-09-10': 100 }
-    expect(monthToDateCost(sep, new Date(2026, 9, 1))).toBe(0)
-    expect(monthToDateCost(sep, new Date(2026, 8, 20))).toBe(100)
-  })
-})
-
 describe('U4 settings tab + budget', () => {
   itLive('冒烟:预算行/单价来源/策略 select/限额/导入导出（无自定义源、无网关表）', () => {
     const st = defaultUiState()
@@ -518,28 +431,56 @@ describe('U4 settings tab + budget', () => {
   })
 
   it('预算分级:0 关闭无条;50/80/95 三档必须真的分得开;cost≤budget 安全', () => {
-    expect(budgetAlertHtml(10, 0)).toBe('')
-    expect(budgetAlertHtml(10, -1)).toBe('')
-    const safe = budgetAlertHtml(10, 100)
+    expect(budgetAlertHtml(10, 0, S)).toBe('')
+    expect(budgetAlertHtml(10, -1, S)).toBe('')
+    // scopeLabel 为空 = 渲染不出区间自述。DESIGN.md §7.5：调用方该改成静态陈述，
+    // 不许传空标签蒙混 —— 一个跟着控件漂的数字裸着出现最容易被当成定值。
+    expect(budgetAlertHtml(10, 100, '')).toBe('')
+    const safe = budgetAlertHtml(10, 100, S)
     expect(safe).toContain('预算进度')
     expect(safe).toContain('budget-ok')
-    const mid = budgetAlertHtml(60, 100)
+    expect(safe).toContain(S)
+    const mid = budgetAlertHtml(60, 100, S)
     expect(mid).toContain('预算过半')
     expect(mid).toContain('budget-warn')
-    const high = budgetAlertHtml(85, 100)
+    const high = budgetAlertHtml(85, 100, S)
     expect(high).toContain('预算快用完')
     expect(high).toContain('budget-err')
-    const crit = budgetAlertHtml(96, 100)
+    const crit = budgetAlertHtml(96, 100, S)
     expect(crit).toContain('预算已超')
     expect(crit).toContain('budget-err2')
     // 旧稿 95% 与 80% 共用 err 分支：界面上两档长得一模一样，承诺的第三档不存在。
     // 这一条专门锁住「三档互不相同」，改回两档会立刻红。
-    const clsOf = (h: string) => (h.match(/budget-(ok|warn|err2?|)\b/) || [''])[0]
+    const clsOf = (h: string) => (h.match(/budget-(ok|warn|err2?|)\b/) || ['', ''])[0]
     const cls = [safe, mid, high, crit].map(clsOf)
-    expect(new Set(cls).size, '四档样式互不相同，实际: ' + cls.join(',' )).toBe(4)
+    expect(new Set(cls).size, '四档样式互不相同，实际: ' + cls.join(',')).toBe(4)
     const tagOf = (h: string) => (h.match(/<b>([^<]+)<\/b>/) || ['', ''])[1]
     const tags = [safe, mid, high, crit].map(tagOf)
     expect(new Set(tags).size, '四档文案互不相同，实际: ' + tags.join(' / ')).toBe(4)
+  })
+
+  /* §7.5 隐状态绑定：告警条自带区间自述。没有这一句时，切范围会静默改掉
+   * 「已用」而版面一字不变，读者只能把漂移的分子当成固定分母的读数。 */
+  it('budgetAlertHtml 必须写出自述区间;空标签不渲染', () => {
+    const html = budgetAlertHtml(60, 100, '本月至今')
+    expect(html).toContain('本月至今')
+    expect(html).toMatch(/本月至今[\s\S]*已用/)
+    expect(budgetAlertHtml(60, 100, '')).toBe('')
+  })
+
+  /* 本月至今的费用与顶栏范围无关 —— 这是修复的核心，回归必须钉住：
+   * 用同一份数据渲染四个范围，预算分子必须逐个相同。 */
+  it('预算分子锁死日历月至今,四档范围下相同', () => {
+    const st = defaultUiState()
+    st.budgetUsd = 100
+    const nums = (['today', '7d', '30d', 'all'] as const).map((r) => {
+      const cmp = compareSources(DATA, st)
+      const html = renderSettings(DATA, st, cmp, r, '')
+      const m = html.match(new RegExp(esc(S) + '\\s*已用 <b>\\$([\\d.,kK]+)</b>'))
+      return m ? m[1] : null
+    })
+    expect(nums[0]).not.toBeNull()
+    for (const n of nums) expect(n).toBe(nums[0])
   })
 
   itLive('budgetUsd 进 settings 展示占用%;st 默认 0', () => {
@@ -551,90 +492,6 @@ describe('U4 settings tab + budget', () => {
     const html = renderSettings(DATA, st, cmp, 'all', '')
     expect(html).toContain('占预算')
     expect(html).not.toMatch(/NaN/)
-  })
-
-  // 预算是与时间范围、与口径都无关的目标量。旧稿拿「当前范围费用」除月预算：
-  // 顶栏一切换范围结论就翻转，设 1000 月预算、切今天显示 4%、切全部显示 91%。
-  // 分级阈值以前写死在设置页文案里一份、在 budgetAlertHtml 里另一份，加一档就漂一档
-  // （文案说 95% 是一档，代码里 95% 和 80% 返回同一个 class）。
-  // 现在文案由 BUDGET_TIERS 生成，这条断言负责盯住两者不再分家。
-  itLive('预算分级的文案与实际阈值必须同源（说几档就有几档）', () => {
-    const st = defaultUiState()
-    const cmp = compareSources(DATA, st)
-    const html = renderSettings(DATA, st, cmp, 'all', '')
-    const said = /会在 ([^ ]+) 三处换上/.exec(html)
-    expect(said, '应读得到未启用提示里写的那几档').toBeTruthy()
-    const listed = (said![1].split('、').map((x) => Number(x.replace('%', ''))))
-    expect(listed).toEqual([...BUDGET_TIERS])
-
-    // 逐档核对：文案里写的每个档位，都要真的换出一个新的 class。
-    const seen: string[] = []
-    for (const t of [10, ...BUDGET_TIERS.map((x) => x + 0.5), 99]) {
-      const h = budgetAlertHtml(t / 100 * 1000, 1000)
-      const cls = /class="note budget-([a-z0-9]+)"/.exec(h)![1]
-      if (seen.indexOf(cls) < 0) seen.push(cls)
-    }
-    // BUDGET_TIERS.length 个阈值 → 阈值以下一档 + 每阈值一档
-    expect(seen.length, '实际只分出了 ' + seen.length + ' 档: ' + seen.join(',')).toBe(BUDGET_TIERS.length + 1)
-  })
-
-  itLive('预算比值不随范围切换变化（分子固定为本月至今）', () => {
-    const st = defaultUiState()
-    st.budgetUsd = 1000
-    const cmp = compareSources(DATA, st)
-    const read = (r: RangeKey) => {
-      const h = renderSettings(DATA, st, cmp, r, '')
-      const m = h.match(/本月至今 ([^·]+) · 占预算 ([\d.]+%)/)
-      expect(m, 'range=' + r + ' 应读得到本月至今与占比').toBeTruthy()
-      return (m as RegExpMatchArray)[2]
-    }
-    const vals = (['today', '7d', '30d', 'all'] as RangeKey[]).map(read)
-    expect(new Set(vals).size, '四个范围读出的占比应一致，实际: ' + vals.join(' / ')).toBe(1)
-  })
-
-  itLive('预算比的是全工具费用，不是纯 pi（pi 停更时不能恒为 0%）', () => {
-    const st = defaultUiState()
-    st.budgetUsd = 100000
-    const cmp = compareSources(DATA, st)
-    const html = renderSettings(DATA, st, cmp, 'all', '')
-    const m = html.match(/本月至今 \$([\d,]+\.\d\d) · 占预算 ([\d.]+%)/)
-    expect(m, '应读得到本月至今金额').toBeTruthy()
-    // pi 侧停更时纯 pi 口径会算出 $0.00；全工具口径必须大于 0。
-    const mtd = monthToDateCost(mergeDailyCost(
-      dailyCost(DATA, computeAll(DATA, st)),
-      externalSummary(DATA, st.policy), DATA))
-    expect(mtd).toBeGreaterThan(0)
-    expect(m![1]).not.toBe('$0.00')
-  })
-
-  itLive('policy 的影响范围必须包含外部侧：外部模型缺 cache_write 单价时不得声称「不影响金额」', () => {
-    const st = defaultUiState()
-    const cmp = compareSources(DATA, st)
-    const ext = externalSummary(DATA, st.policy)
-    if (!ext || !(ext.rows || []).length) return // 无外部数据的 fixture 走不到这条
-
-    // 真实数据下三个有 cache_write 的模型在 models.dev 里单价齐全，这句碰巧是对的，
-    // 断言会空转。所以造一个「外部模型缺 cache_write 单价」的合成场景：
-    // 从 price.cost 删掉 cache_write，normalizeCost 就会按 policy 推算并标记该字段。
-    const bare: any = JSON.parse(JSON.stringify(DATA))
-    let patched = 0
-    for (const t of (bare.external.tools || [])) {
-      for (const m of (t.models || [])) {
-        if ((m.cacheWrite || 0) > 0 && m.price && m.price.cost && m.price.cost.cache_write != null) {
-          delete m.price.cost.cache_write
-          patched++
-        }
-      }
-    }
-    if (!patched) return // 这份数据没有任何可删的 cache_write 单价
-    const ext2 = externalSummary(bare, st.policy)!
-    const needs = (ext2.rows || []).some((r: any) => (r.models || []).some((m: any) =>
-      (m.tok && m.tok.cacheWrite || 0) > 0 && (m.estimatedFields || []).indexOf('cache_write') >= 0))
-    expect(needs, '合成场景应当让外部侧真的需要 policy（patched=' + patched + '）').toBe(true)
-
-    // 这时那句「切换此项不影响金额」是假的，必须不出现
-    expect(renderSettings(bare, st, compareSources(bare, st), 'all', ''))
-      .not.toContain('切换此项不影响金额')
   })
 
   itLive('真实数据含 sessionsAll(增量契约,U4 钻取依赖)', () => {

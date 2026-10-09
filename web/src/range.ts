@@ -23,6 +23,7 @@ export function rangeAnchor(data: any): string | null {
   return max
 }
 
+
 /** 返回 cutoff 日历日(YYYY-MM-DD);null 表示不过滤 */
 export function rangeCutoffKey(allDays: string[], range: RangeKey, anchor?: string | null): string | null {
   if (range === 'all') return null

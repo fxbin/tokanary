@@ -6,7 +6,7 @@ import {
   filterDaysByRange, rangeCutoffKey, calcStreak, weekTopModels,
   type PricingOpts, type PriceSource, type RangeKey
 } from '../pricing'
-import { MODEL_COLORS, stackBar, donut, legend, dayChart, heatmap, trimNum } from '../charts'
+import { MODEL_COLORS, stackBar, donut, legend, dayChart, trimNum } from '../charts'
 import { th, sourceTag, stableColorIndex, sesRecency, pad2, localDay, esc, emptyStateHtml, type UiState } from './shared'
 
 export function renderSessions(data: any, st: UiState, cmp: Record<string, number>, range: RangeKey): string {
