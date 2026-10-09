@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -169,10 +170,32 @@ func printPriceStatus(out string, maxAge time.Duration) int {
 	}
 	fmt.Printf("[%s] %s\n  抓取于 %s（%d 天前）· 有效期阈值 %d 天\n",
 		state, filepath.Base(out), st.FetchedAt, int(st.Age.Hours()/24), int(maxAge.Hours()/24))
+	// The table is now rewritten unattended every 7 days, which makes the
+	// previous copy the only way back if models.dev publishes something broken.
+	// So say it exists and say what it is - otherwise it is just a stray file.
+	if prev := tableStamp(out + ".bak"); prev != "" {
+		fmt.Printf("  回滚副本 %s（抓取于 %s）\n", filepath.Base(out)+".bak", prev)
+	}
 	if st.Stale {
 		fmt.Println("  更新：tokanary prices --force")
 	}
 	return 0
+}
+
+// tableStamp reads just the fetchedAt stamp out of a table file.
+func tableStamp(path string) string {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	var doc struct {
+		FetchedAt any `json:"fetchedAt"`
+	}
+	if json.Unmarshal(raw, &doc) != nil {
+		return ""
+	}
+	s, _ := doc.FetchedAt.(string)
+	return s
 }
 
 var _ = strings.TrimSpace
