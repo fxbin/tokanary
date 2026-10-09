@@ -225,6 +225,7 @@ func runCollect(args []string) int {
 			Input: agg.Input, CacheRead: agg.CacheRead, CacheWrite: agg.CacheWrite,
 			Output: agg.Output, Reasoning: agg.Reasoning,
 			Models: convertModels(agg.Models), Days: convertDays(agg.Days),
+			Hours:   convertDays(agg.Hours),
 			FirstTs: agg.FirstTs, LastTs: agg.LastTs,
 			DedupNote: note, Files: len(files),
 		})

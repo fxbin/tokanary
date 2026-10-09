@@ -40,6 +40,8 @@ type ToolUsage struct {
 	ModelKeys  orderedModelKeys       `json:"-"`
 	Days       map[string]*ModelUsage `json:"days"`
 	DayKeys    orderedModelKeys       `json:"-"`
+	Hours      map[string]*ModelUsage `json:"hours,omitempty"`
+	HourKeys   orderedModelKeys       `json:"-"`
 	FirstTs    string                 `json:"firstTs"`
 	LastTs     string                 `json:"lastTs"`
 	DedupNote  string                 `json:"dedupNote"`
@@ -57,6 +59,18 @@ func (t *ToolUsage) modelOrder() []string {
 	}
 	out := make([]string, 0, len(t.Models))
 	for k := range t.Models {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
+}
+
+func (t *ToolUsage) hourOrder() []string {
+	if len(t.HourKeys.Keys) > 0 {
+		return t.HourKeys.Keys
+	}
+	out := make([]string, 0, len(t.Hours))
+	for k := range t.Hours {
 		out = append(out, k)
 	}
 	sort.Strings(out)
@@ -194,6 +208,21 @@ type ExtDayRow struct {
 	Reasoning  int64  `json:"reasoning"`
 }
 
+// ExtHourRow is one `YYYY-MM-DDTHH` bucket inside the external block. Adapters
+// stamp records with hour-resolution ISO timestamps, so the heatmap is not
+// limited to whichever tools happen to feed a warehouse.
+//
+//nolint:revive // mirrors ExtDayRow field-for-field
+type ExtHourRow struct {
+	H          string `json:"h"`
+	Total      int64  `json:"total"`
+	Input      int64  `json:"input"`
+	CacheRead  int64  `json:"cacheRead"`
+	CacheWrite int64  `json:"cacheWrite"`
+	Output     int64  `json:"output"`
+	Reasoning  int64  `json:"reasoning"`
+}
+
 // ExtTool is one tool block inside the dashboard's external section.
 type ExtTool struct {
 	Tool       string        `json:"tool"`
@@ -212,6 +241,7 @@ type ExtTool struct {
 	Note       string        `json:"note"`
 	Models     []ExtModelRow `json:"models"`
 	Days       []ExtDayRow   `json:"days"`
+	Hours      []ExtHourRow  `json:"hours,omitempty"`
 }
 
 // ExtTotal is the external section's grand total.
@@ -294,12 +324,26 @@ func BuildExternal(e *ExternalUsage) *External {
 			})
 		}
 		sort.SliceStable(days, func(i, j int) bool { return days[i].D < days[j].D })
+
+		hours := make([]ExtHourRow, 0, len(t.Hours))
+		for _, k := range t.hourOrder() {
+			v := t.Hours[k]
+			if v == nil {
+				continue
+			}
+			hours = append(hours, ExtHourRow{
+				H: k, Total: v.Total(), Input: v.Input, CacheRead: v.CacheRead,
+				CacheWrite: v.CacheWrite, Output: v.Output, Reasoning: v.Reasoning,
+			})
+		}
+		sort.SliceStable(hours, func(i, j int) bool { return hours[i].H < hours[j].H })
+
 		out.Tools = append(out.Tools, ExtTool{
 			Tool: t.Tool, Label: t.Label, Home: t.Home, Sessions: t.Sessions,
 			Calls: t.Calls, Input: t.Input, CacheRead: t.CacheRead,
 			CacheWrite: t.CacheWrite, Output: t.Output, Reasoning: t.Reasoning,
 			Total: toolTotal, FirstTs: t.FirstTs, LastTs: t.LastTs,
-			Note: t.DedupNote, Models: rows, Days: days,
+			Note: t.DedupNote, Models: rows, Days: days, Hours: hours,
 		})
 	}
 	sort.SliceStable(out.Tools, func(i, j int) bool { return out.Tools[i].Total > out.Tools[j].Total })
