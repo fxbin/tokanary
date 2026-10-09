@@ -226,8 +226,9 @@ func runCollect(args []string) int {
 			Input: agg.Input, CacheRead: agg.CacheRead, CacheWrite: agg.CacheWrite,
 			Output: agg.Output, Reasoning: agg.Reasoning,
 			Models: convertModels(agg.Models), Days: convertDays(agg.Days),
-			Hours:   convertDays(agg.Hours),
-			FirstTs: agg.FirstTs, LastTs: agg.LastTs,
+			Hours:    convertDays(agg.Hours),
+			DayModel: convertDays(agg.DayModel),
+			FirstTs:  agg.FirstTs, LastTs: agg.LastTs,
 			DedupNote: note, Files: len(files),
 		})
 		fmt.Printf("     %d 会话 · %d 次调用 · %.1fM billable token%s\n",

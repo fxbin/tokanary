@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"sort"
+	"strings"
 )
 
 // ModelUsage is one model's token counters inside an external tool row.
@@ -42,6 +43,7 @@ type ToolUsage struct {
 	DayKeys    orderedModelKeys       `json:"-"`
 	Hours      map[string]*ModelUsage `json:"hours,omitempty"`
 	HourKeys   orderedModelKeys       `json:"-"`
+	DayModel   map[string]*ModelUsage `json:"dayModel,omitempty"`
 	FirstTs    string                 `json:"firstTs"`
 	LastTs     string                 `json:"lastTs"`
 	DedupNote  string                 `json:"dedupNote"`
@@ -223,25 +225,43 @@ type ExtHourRow struct {
 	Reasoning  int64  `json:"reasoning"`
 }
 
+// ExtDayModelRow is one `d`×`key` bucket: the external-side counterpart of the
+// pi warehouse's dayModel. Without it a six-tool ledger can only rank models for
+// one of them.
+type ExtDayModelRow struct {
+	D          string `json:"d"`
+	Key        string `json:"key"`
+	Total      int64  `json:"total"`
+	Input      int64  `json:"input"`
+	CacheRead  int64  `json:"cacheRead"`
+	CacheWrite int64  `json:"cacheWrite"`
+	Output     int64  `json:"output"`
+	Reasoning  int64  `json:"reasoning"`
+}
+
+// dayModelSep joins day and model into one accumulator key.
+const dayModelSep = "\x1f"
+
 // ExtTool is one tool block inside the dashboard's external section.
 type ExtTool struct {
-	Tool       string        `json:"tool"`
-	Label      string        `json:"label"`
-	Home       string        `json:"home"`
-	Sessions   int           `json:"sessions"`
-	Calls      int           `json:"calls"`
-	Input      int64         `json:"input"`
-	CacheRead  int64         `json:"cacheRead"`
-	CacheWrite int64         `json:"cacheWrite"`
-	Output     int64         `json:"output"`
-	Reasoning  int64         `json:"reasoning"`
-	Total      int64         `json:"total"`
-	FirstTs    string        `json:"firstTs"`
-	LastTs     string        `json:"lastTs"`
-	Note       string        `json:"note"`
-	Models     []ExtModelRow `json:"models"`
-	Days       []ExtDayRow   `json:"days"`
-	Hours      []ExtHourRow  `json:"hours,omitempty"`
+	Tool       string           `json:"tool"`
+	Label      string           `json:"label"`
+	Home       string           `json:"home"`
+	Sessions   int              `json:"sessions"`
+	Calls      int              `json:"calls"`
+	Input      int64            `json:"input"`
+	CacheRead  int64            `json:"cacheRead"`
+	CacheWrite int64            `json:"cacheWrite"`
+	Output     int64            `json:"output"`
+	Reasoning  int64            `json:"reasoning"`
+	Total      int64            `json:"total"`
+	FirstTs    string           `json:"firstTs"`
+	LastTs     string           `json:"lastTs"`
+	Note       string           `json:"note"`
+	Models     []ExtModelRow    `json:"models"`
+	Days       []ExtDayRow      `json:"days"`
+	Hours      []ExtHourRow     `json:"hours,omitempty"`
+	DayModel   []ExtDayModelRow `json:"dayModel,omitempty"`
 }
 
 // ExtTotal is the external section's grand total.
@@ -338,12 +358,34 @@ func BuildExternal(e *ExternalUsage) *External {
 		}
 		sort.SliceStable(hours, func(i, j int) bool { return hours[i].H < hours[j].H })
 
+		dayModel := make([]ExtDayModelRow, 0, len(t.DayModel))
+		dmKeys := make([]string, 0, len(t.DayModel))
+		for k := range t.DayModel {
+			dmKeys = append(dmKeys, k)
+		}
+		sort.Strings(dmKeys)
+		for _, k := range dmKeys {
+			v := t.DayModel[k]
+			if v == nil {
+				continue
+			}
+			d, mk, ok := strings.Cut(k, dayModelSep)
+			if !ok {
+				continue
+			}
+			dayModel = append(dayModel, ExtDayModelRow{
+				D: d, Key: mk, Total: v.Total(), Input: v.Input, CacheRead: v.CacheRead,
+				CacheWrite: v.CacheWrite, Output: v.Output, Reasoning: v.Reasoning,
+			})
+		}
+
 		out.Tools = append(out.Tools, ExtTool{
 			Tool: t.Tool, Label: t.Label, Home: t.Home, Sessions: t.Sessions,
 			Calls: t.Calls, Input: t.Input, CacheRead: t.CacheRead,
 			CacheWrite: t.CacheWrite, Output: t.Output, Reasoning: t.Reasoning,
 			Total: toolTotal, FirstTs: t.FirstTs, LastTs: t.LastTs,
 			Note: t.DedupNote, Models: rows, Days: days, Hours: hours,
+			DayModel: dayModel,
 		})
 	}
 	sort.SliceStable(out.Tools, func(i, j int) bool { return out.Tools[i].Total > out.Tools[j].Total })

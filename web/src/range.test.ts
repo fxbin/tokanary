@@ -749,7 +749,7 @@ describe('本周 Top：表头窗口必须与列表同源', () => {
     const otherWk = isoWeekRange(rangeAnchor(DATA))!
     if (otherWk.start !== wk.start) expect(html).not.toContain(otherWk.start + ' ~ ' + otherWk.end)
     // 范围写明只覆盖 pi 侧 dayModel
-    expect(html).toContain('仅 pi 侧模型（外部工具的用量见下方各工具行）')
+    expect(html).toContain('全部工具')
   })
 })
 
@@ -774,7 +774,7 @@ describe('U6 week top models', () => {
       { m: { key: 'prev-week' }, unit: 999 },
       { m: { key: 'future' }, unit: 999 }
     ] }
-    const top = weekTopModels(data, summary, '2026-09-16')
+    const top = weekTopModels(data, summary, undefined, '2026-09-16')
     const keys = top.map((r) => r.key)
     expect(keys).not.toContain('prev-week')
     expect(keys).not.toContain('future')
@@ -794,8 +794,8 @@ describe('U6 week top models', () => {
   })
 
   itLive('无 dayModel / 空 anchor → [];真实 data 有输出且无 NaN', () => {
-    expect(weekTopModels({ days: [{ d: '2026-09-16', total: 1 }], dayModel: [] }, { rows: [] }, '2026-09-16')).toEqual([])
-    expect(weekTopModels({ dayModel: [{ d: '2026-09-16', key: 'x', total: 1 }] }, { rows: [] }, null)).toEqual([])
+    expect(weekTopModels({ days: [{ d: '2026-09-16', total: 1 }], dayModel: [] }, { rows: [] }, undefined, '2026-09-16')).toEqual([])
+    expect(weekTopModels({ dayModel: [{ d: '2026-09-16', key: 'x', total: 1 }] }, { rows: [] }, undefined, null)).toEqual([])
     expect(weekTopModels(DATA, computeAll(DATA, defaultUiState()))).toBeInstanceOf(Array)
     const top = weekTopModels(DATA, computeAll(DATA, defaultUiState()))
     top.forEach((r) => {
@@ -813,8 +813,17 @@ describe('U6 week top models', () => {
     expect(html).toMatch(/\d+ 天|—/)
     expect(html).not.toMatch(/NaN/)
     expect(html).not.toMatch(/>undefined</)
-    // 空 dayModel → 降级
-    const noDm = { ...DATA, dayModel: [], days: [] }
+    // 两侧都没有 day×model → 降级。外部工具现在也带 dayModel，所以只清 pi 侧
+    // 不再构得成「无数据」——那正是这个夹具要断言的降级分支。
+    const noDm = {
+      ...DATA,
+      dayModel: [],
+      days: [],
+      external: {
+        ...DATA.external,
+        tools: ((DATA as any).external?.tools || []).map((t: any) => ({ ...t, dayModel: [] }))
+      }
+    }
     const html2 = renderOverview(noDm, st, cmp, 'all')
     expect(html2).toContain('本周暂无数据')
     expect(html2).toContain('连续活跃')
