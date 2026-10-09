@@ -10,6 +10,9 @@ import { MODEL_COLORS, stackBar, donut, legend, dayChart, heatmap, trimNum } fro
 import { windowUsage, type WindowUsage } from '../usage'
 import { th, sourceTag, stableColorIndex, sesRecency, pad2, localDay, esc, type UiState } from './shared'
 
+/** 时段热力格的来源自述。只有 pi 侧有 hours 粒度，这一句是这个矩阵唯一的口径声明（§7.5）。 */
+export const HEATMAP_SOURCE_LABEL = 'pi 侧小时粒度'
+
 export function renderOverview(data: any, st: UiState, cmp: Record<string, number>, range: RangeKey): string {
   if (!data) {
     return '<div class="empty">没有用量数据 —— 请先运行 <code>tokanary refresh</code> 重建仓库。</div>'
@@ -213,24 +216,17 @@ html.push('<section class="card insights">')
   }
   html.push('</section>')
 
-  /* 日历 heatmap:weekday × hour,消费 hours 契约。
-     小时粒度只有 pi 侧有(外部工具的日志是逐日的),所以这块天然只看 pi。
-     全 0 有两种成因,文案必须分清:仓库压根没有 hours 字段(跑 refresh 能拿到),
-     还是 hours 有但都落在当前窗口之外(refresh 也拿不到,别再让用户白跑一次)。 */
-  const allHours = (data.hours || []) as any[]
-  const piLastHour = allHours.map(function (x) { return String(x.h || '') }).filter(Boolean).sort().pop() || ''
-  const rangeHours = filterHoursByRange(allHours as any, range, rangeAnchor(data))
+  /* 时段热力格:weekday × hour,消费 hours 契约;缺 hours 时降级文案。
+   * 只有 pi 侧有 hours 粒度(外部 CLI 是逐日的),所以这个矩阵覆盖不到同屏
+   * dayChart 的全工具合计 —— 标题与 caption 都必须把这件事说出来(§7.5)。 */
+  const rangeHours = filterHoursByRange((data.hours || []) as any, range, rangeAnchor(data))
   html.push('<section class="card">')
-  html.push('<h2>活动热力图 <span class="hint">星期 × 小时 · 仅 pi 侧（外部工具日志是逐日的） · 格色 = token 强度</span></h2>')
-  if (!allHours.length) {
-    html.push('<div class="empty">仓库还没有小时粒度数据 —— 重新跑 tokanary refresh 获取。</div>')
+  html.push('<h2>pi 侧时段热力图 <span class="hint">星期 × 小时 · 格色 = token 强度 · ' +
+    '仅 pi 侧有小时粒度，外部工具按日统计、不在本图内 · 鼠标悬停看该格明细</span></h2>')
+  if (!(data.hours || []).length) {
+    html.push('<div class="empty">重新跑 tokanary refresh 获取小时粒度（仓库需含 hours 字段）。</div>')
   } else {
-    html.push(heatmap(hourMatrix(rangeHours), {
-      emptyText: range === 'all'
-        ? 'pi 侧的小时粒度数据为空。'
-        : 'pi 在「' + rangeLabel + '」内没有小时粒度数据 —— 最后一次小时级用量在 ' +
-          piLastHour.slice(0, 10) + '，跑 refresh 也拿不到更近的（这段区间 pi 本就没有用量）。'
-    }))
+    html.push(heatmap(hourMatrix(rangeHours), { sourceLabel: HEATMAP_SOURCE_LABEL }))
   }
   html.push('</section>')
 

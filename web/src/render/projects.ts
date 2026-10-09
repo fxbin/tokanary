@@ -1,24 +1,38 @@
 import {
-  fmt, money, pct, CATS, POLICIES, SOURCES,
-  normalizeCost, costOfTokens, computeAll, compareSources,
-  dailyCost, externalSummary, rangeStats, rangeExt, rangeAnchor, mergeDailyCost, monthToDateCost,
-  filterHoursByRange, hourMatrix, rangeInsights, RANGES,
-  filterDaysByRange, rangeCutoffKey, calcStreak, weekTopModels,
-  type PricingOpts, type PriceSource, type RangeKey
+  fmt, money, pct, CATS, POLICIES, SOURCES, normalizeCost, costOfTokens, computeAll,
+  compareSources, dailyCost, externalSummary, rangeStats, rangeExt, rangeAnchor, mergeDailyCost,
+  monthToDateCost, filterHoursByRange, hourMatrix, rangeInsights, RANGES, filterDaysByRange,
+  rangeCutoffKey, calcStreak, weekTopModels, type PricingOpts, type PriceSource, type RangeKey
 } from '../pricing'
-import { MODEL_COLORS, stackBar, donut, legend, dayChart, heatmap, trimNum } from '../charts'
+import { MODEL_COLORS, stackBar, donut, legend, dayChart, trimNum } from '../charts'
 import { th, sourceTag, stableColorIndex, sesRecency, pad2, localDay, esc, emptyStateHtml, type UiState } from './shared'
 
 // 分级阈值是唯一真相源，设置页那句「会在 X% 换色」也从这里生成 ——
 // 旧稿把 50/80/95 写死在设置页文案里、分级逻辑另写一份，加一档就漂一档。
 export const BUDGET_TIERS = [50, 80, 95] as const
 
-// 四档分级。旧稿 >=95 与 >=80 都归 'err'，两个分支完全等价 —— 95% 那一档是死代码，
-// 而设置页的说明文字还写着「50% / 80% / 95% 分级提示」，界面承诺了一个它没有提供的
-// 分辨率：80% 和 99% 在屏幕上长得一模一样，用户会以为红色就等于 95%。
-// 现在 95% 单独一档，各档文案也说实话。
-export function budgetAlertHtml(cost: number, budgetUsd: number): string {
+/**
+ * 月预算区间的自述词。§7.5 要求派生读数自报范围，这一句是它唯一的载体。
+ * 口径是全部工具：这是本机 AI 用量账本，月预算若只对 pi 侧，pi 一停更就永远显示
+ * 0%，而用户真正在意的花钱量其实是顶栏「跨工具总览」那一列。
+ */
+export const BUDGET_SCOPE_LABEL = '本月至今 · 全部工具'
+
+/**
+ * 预算告警条。`cost` 必须是「与 budgetUsd 同一口径区间」的支出 —— 月预算对
+ * 日历月至今，而不是顶栏当前选中的范围。scopeLabel 是这个区间的自述，按
+ * DESIGN.md §7.5 隐状态绑定：跟着控件变化的数字必须写出它是谁的子集，否则
+ * 读者会把随范围筛选器漂移的数字当成固定分母的分子。渲染不出这句话时，调用
+ * 方应改为静态陈述，而不是传一个空标签蒙混。
+ *
+ * 四档分级。旧稿 >=95 与 >=80 都归 'err'，两个分支完全等价 —— 95% 那一档是死代码，
+ * 而设置页的说明文字还写着「50% / 80% / 95% 分级提示」，界面承诺了一个它没有提供的
+ * 分辨率：80% 和 99% 在屏幕上长得一模一样，用户会以为红色就等于 95%。
+ * 现在 95% 单独一档，各档文案也说实话。
+ */
+export function budgetAlertHtml(cost: number, budgetUsd: number, scopeLabel: string): string {
   if (!budgetUsd || budgetUsd <= 0) return ''
+  if (!scopeLabel) return ''
   const pctUsed = cost / budgetUsd * 100
   const level = pctUsed >= BUDGET_TIERS[2] ? 'err2' : pctUsed >= BUDGET_TIERS[1] ? 'err'
     : pctUsed >= BUDGET_TIERS[0] ? 'warn' : 'ok'
@@ -26,12 +40,13 @@ export function budgetAlertHtml(cost: number, budgetUsd: number): string {
     : level === 'err' ? '注意 · 预算快用完'
       : level === 'warn' ? '注意 · 预算过半'
         : '预算进度'
-  const tail = level === 'err2' ? '本月至今已超出月预算。'
-    : level === 'err' ? '本月至今已用掉八成以上，可以现在调整。'
-      : level === 'warn' ? '本月至今已过半。'
-        : '本月至今进度。在设置页可调整月预算。'
-  return '<div class="note budget-' + level + '"><b>' + tag + '</b>：本月至今已用 <b>' + money(cost) +
-    '</b> / 预算 <b>' + money(budgetUsd) + '</b>（' + pct(pctUsed) + '）' + tail + '</div>'
+  const tail = level === 'err2' ? '已超出月预算。'
+    : level === 'err' ? '已用掉八成以上，可以现在调整。'
+      : level === 'warn' ? '已过半。'
+        : '进度。在设置页可调整月预算。'
+  return '<div class="note budget-' + level + '"><b>' + tag + '</b>：' + esc(scopeLabel) +
+    '已用 <b>' + money(cost) + '</b> / 预算 <b>' + money(budgetUsd) + '</b>（' + pct(pctUsed) + '）' +
+    tail + '</div>'
 }
 
 /**
@@ -174,10 +189,13 @@ export function renderProjects(data: any, st: UiState, cmp: Record<string, numbe
   }).join(''))
   html.push('</section>')
 
-  /* 预算条。与设置页同一个口径：全工具、本月至今、与范围无关。
-     旧稿这里传的是范围费用（all 时更是全量），和设置页的「月预算」对不上。 */
+  /* 预算条。分母是月预算，分子就锁定「日历月至今 + 全工具」，两个约束各修一个
+   * 独立的 bug：
+   * - 不能用上面的范围聚合 sumCost，那个数跟着顶栏筛选器漂移（切「近 7 天」就变成拿一周除以月）；
+   * - 不能只用 pi 侧 dailyCost，pi 一停更就永远显示 0%，而用户真正在意的花钱量是
+   *   顶栏「跨工具总览」那一列。 */
   const ba = budgetAlertHtml(monthToDateCost(mergeDailyCost(
-    dailyCost(data, s), externalSummary(data, st.policy), data)), st.budgetUsd)
+    dailyCost(data, s), externalSummary(data, st.policy), data)), st.budgetUsd, BUDGET_SCOPE_LABEL)
   if (ba) html.push(ba)
 
   /* 归因条 */

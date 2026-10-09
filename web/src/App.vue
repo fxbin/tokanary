@@ -58,7 +58,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, reactive, onMounted, onUnmounted, nextTick } from 'vue'
+import { computed, reactive, ref, watch, onMounted, onUnmounted, nextTick } from 'vue'
 import {
   compareSources, defaultOpts, RANGES, POLICIES, freshnessChip, type Policy
 } from './pricing'
@@ -88,6 +88,15 @@ const { theme, applyTheme, toggleTheme, themeIcon, themeTitle } = useTheme()
 const { tab, range, readHash, writeHash, setRange, onHashChange } = useHashRoute(TABS.map((t) => t.k))
 const { dataRef, pollFail, loading, loadDashboard, startPolling } = useDashboard()
 const { ioText, ioError, saveState, loadState, exportPrices, importPrices } = usePriceIo(st)
+
+/**
+ * 「重置为 models.dev 价格」的就地撤销槽。清空覆盖值前存一份旧值，点撤销原样写回。
+ * 存内存而非 localStorage：saveState() 紧接着就把旧的覆盖值覆盖掉了，重启后
+ * 无法复原 —— 一次误点若不可逆，手填几十条价格只能靠回忆重填。
+ */
+const undoOverrides = ref<Record<string, number> | null>(null)
+// 计数走 UiState 是因为渲染函数只读 st；快照本身留在 undoOverrides，两者同步写。
+watch(undoOverrides, (v) => { st.undoPendingCount = v ? Object.keys(v || {}).length : 0 })
 
 /**
  * 焦点保持：v-html 每次都整体重写 innerHTML，正在编辑的 input 会变成一个全新节点，
@@ -193,7 +202,22 @@ function onDocClick(e: MouseEvent) {
   if (target.id === 'btn-export' || target.closest?.('#btn-export')) { exportPrices(); return }
   if (target.id === 'btn-import' || target.closest?.('#btn-import')) { importPrices(); return }
   if (target.id === 'btn-reset' || target.closest?.('#btn-reset')) {
+    // 破坏性动作走两步：先确认，再留一份可就地撤销的快照。丢的是用户在模型页
+    // 手填的价格，没有第二份副本 —— localStorage 里的那一份会被这次写入覆盖，
+    // 所以撤销只能靠内存里这份（Nielsen「任务+反馈+撤销」里的第三条）。
+    const prev = st.overrides
+    const n = Object.keys(prev || {}).length
+    if (!window.confirm('将清除 ' + n + ' 条手动改价，全部金额回到 models.dev 折算值。确定？')) return
+    undoOverrides.value = prev
     st.overrides = {}
+    saveState()
+    return
+  }
+  if (target.id === 'btn-undo' || target.closest?.('#btn-undo')) {
+    const prev = undoOverrides.value
+    if (!prev) return
+    st.overrides = prev
+    undoOverrides.value = null
     saveState()
     return
   }

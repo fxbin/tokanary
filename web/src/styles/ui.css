@@ -329,3 +329,17 @@ footer.foot { max-width: 1360px; margin: 8px auto 0; color: var(--dim); font-siz
   .ins-row { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
   .tc-head { flex-wrap: wrap; }
 }
+
+/* 设置页：只读的价源陈述。降级为 .note 后需要自己的排版 —— 它比 .set-row 长
+ * （一行塞进「源 → 金额 → 抓取时间 → 匹配情况」），挂在 .settings 的纵向 gap 里。 */
+.src-note { line-height: 1.7; }
+.src-note b { font-weight: 600; }
+
+/* 撤销入口：文字动作，不是第四个按钮。破坏性操作刚发生的那一下，撤销要和
+ * 那句话同处一块，单独放一排按钮会把它读成又一个可点的选项。 */
+.link-btn {
+  border: 0; background: none; padding: 0 2px;
+  font-size: inherit; color: var(--accent-ink);
+  text-decoration: underline; cursor: pointer;
+}
+.link-btn:hover { border: 0; background: none; color: var(--accent); }
