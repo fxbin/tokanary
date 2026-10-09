@@ -57,7 +57,7 @@ testdata/         合成夹具（勿当真实数据）
 
 ## 设计语言
 
-- **现行标准见 [DESIGN.md](DESIGN.md)（青簡）**——改 UI 前必读
+- **现行标准见 [DESIGN.md](DESIGN.md)（青簡）**，改 UI 前必读
 - Token：`web/src/styles/tokens.css`；壳：`shell.css`；内容组件：`ui.css`
 - 分类色唯一源 `web/src/palette.ts`；禁止内联 hex
 
@@ -73,6 +73,13 @@ web/src/
   range.ts          范围聚合
   palette.ts · charts.ts
 ```
+
+## 提交信息
+
+- **不用中文破折号**（U+2014，成对或落单都不用）。连接分句用「，」，引出结论或清单用「：」，需要停顿就另起一句。本条不举字符实例：把被禁的符号写进规范，等于让规范先破一次自己的规矩，检测用码位即可。范围覆盖 commit subject 与 body，以及本文档正文。
+- 数字区间用 en dash（U+2013，例：16–1024）；命令行参数里的 ASCII 双连字符（`--force`、`--status`）原样保留；不得用三个及以上的连字符画分隔线。
+- subject 沿用 `type(scope): 说明`，说明写成**一句自然语言**：像说话那样讲清改了什么、为什么，不靠标点符号表达两半的关系，也不写压缩到读不通的行话。
+- 正文一行一事。
 
 ## 禁止
 
