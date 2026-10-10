@@ -1,4 +1,6 @@
-/* 范围聚合与时间窗 —— 与计价核心分离，纯函数、无依赖 pricing 内部。 */
+/* 范围聚合与时间窗 —— 与计价核心分离，纯函数、无依赖 pricing 内部。*/
+import { canonicalModelKey } from './modelkey'
+
 export type RangeKey = 'today' | '7d' | '30d' | 'all'
 export const RANGES: Record<RangeKey, { label: string; days: number | null }> = {
   today: { label: '今天', days: 1 },
@@ -158,21 +160,33 @@ export function mergeDailyUsage(data: any): any[] {
   return Object.keys(byDay).sort().map((k) => byDay[k])
 }
 
-/** 合并 pi 日费用与 external 日费用（external 按该工具综合均价摊到天）。
- *  r.unit 来自 externalSummary:该工具全量费用 ÷ 全量 token × 1e6,是按真实
- *  四段 token 构成加权的综合均价,不是四档单价的算术平均。 */
+/**
+ * 合并 pi 日费用与外部日费用。
+ *
+ * `extDay` 是 externalRangeByModel 的 byDay：逐日逐模型逐项计价的精确值。传它就
+ * 不再按每工具综合均价摊算 —— 均价按全量构成加权，区间内构成一变就偏。
+ *
+ * 不传时退回旧的均价路径：sqlite 适配器与走 driver 的 codex 没有逐日逐模型桶，
+ * 那里仍然只能摊，保留原样是为了不改动那条退路的既有数字。
+ */
 export function mergeDailyCost(
   costByDay: Record<string, number>,
   extSummary: { rows: any[]; totalTokens?: number; totalCost?: number } | null,
-  data: any
+  data: any,
+  extDay?: Record<string, { tokens: number; cost: number; exact: boolean }>
 ): Record<string, number> {
   const out: Record<string, number> = { ...costByDay }
   if (!extSummary) return out
+  if (extDay) {
+    for (const d of Object.keys(extDay)) {
+      out[d] = (out[d] || 0) + extDay[d].cost
+    }
+    return out
+  }
   const tools = data?.external?.tools || []
   const rows = extSummary.rows || []
   rows.forEach((r: any, i: number) => {
     const t = tools[i]
-    // match by label when possible
     const tool = tools.find((x: any) => x.label === r.label || x.tool === r.label) || t
     if (!tool) return
     const unit = r.unit || 0
@@ -263,14 +277,24 @@ export interface RangeExtRow {
   fields: DayFields
   tokens: number
   cost: number
+  /** false = 该工具没有逐日逐模型明细，费用按全量构成摊到范围内。 */
+  exact: boolean
 }
 
-/** 跨工具范围汇总:token 按各工具 days 精确求和,费用按该工具综合均价摊算。
- *  r.unit 与 pi 侧 rows[].unit 同为「按真实 token 构成加权」的 $/1M(见
- *  mergeDailyCost 注释),不是四价算术平均 —— 缓存占大头的工具因此不会被高估。
- *  日粒度没有 per-model 明细,故按全量构成摊到范围内,与 pi 侧 dailyCost 同法。 */
+/**
+ * 跨工具范围汇总：token 按各工具 days 精确求和，费用优先逐日逐模型计价。
+ *
+ * 均价摊算是退路，不是主路。它曾经是唯一的路，因为外部工具只有逐日合计、没有
+ * 逐日逐模型；`external.tools[].dayModel` 落地后那个前提就不成立了，而留着它
+ * 会让同一区间偏 46%（本机实测 $298.65 对精确值 $204.26）。均价按全量构成加权，
+ * 区间内的构成一变就偏，缓存占大头的工具偏得最狠。
+ *
+ * 逐日逐模型计价要用缺价策略补全单价，那是计价核心的事，这个模块刻意不依赖它，
+ * 所以由调用方把 externalRangeByModel 的结果传进来。
+ */
 export function rangeExt(
-  extSummary: { rows: any[] } | null, range: RangeKey, anchor?: string | null
+  extSummary: { rows: any[] } | null, range: RangeKey, anchor?: string | null,
+  extCost?: Record<string, { tokens: number; cost: number; exact: boolean }>
 ): { rows: RangeExtRow[]; totalTokens: number; totalCost: number } {
   const out = { rows: [] as RangeExtRow[], totalTokens: 0, totalCost: 0 }
   if (!extSummary) return out
@@ -283,8 +307,14 @@ export function rangeExt(
       }
     }))
     const tokens = fields.total
-    const cost = (r.unit || 0) * tokens / 1e6
-    out.rows.push({ label: r.t.label, fields, tokens, cost })
+
+    // 逐日逐模型的精确值按工具取，不能按模型 key 查：key 是全局的，拿它算单个
+    // 工具会把别的工具的钱也算进来（实测会翻到五倍）。
+    const cell = extCost && extCost[String(r.t.tool || r.t.label || '')]
+    const cost = cell ? cell.cost : (r.unit || 0) * tokens / 1e6
+    const exact = cell ? cell.exact : false
+
+    out.rows.push({ label: r.t.label, fields, tokens, cost, exact })
     out.totalTokens += tokens
     out.totalCost += cost
   })
@@ -361,8 +391,9 @@ export type UnitMap = Record<string, number>
  * 「外部工具的用量见下方各工具行」把落差解释掉 —— 那不是同一件事，那是一张
  * 名不副实的榜单。
  *
- * `extUnit` 必须一起传进来，否则外部行会以 $0 参与排名：一张按费用降序的表里
- * 混着 $0 行，排序键等于不存在。
+ * `extUnit` 必须一起传进来，否则外部那一半会以 $0 参与排名：一张按费用降序的
+ * 表里混着 $0 行，排序键等于不存在。它也只作用于外部那半 token，pi 那半走
+ * summary 自己的 unit。
  */
 export function weekTopModels(
   data: any,
@@ -381,28 +412,38 @@ export function weekTopModels(
   const wk = isoWeekRange(a)
   if (!wk) return []
   const startKey = wk.start
-  const unitByKey: Record<string, number> = {}
+  const piUnit: Record<string, number> = {}
   ;(summary.rows || []).forEach(function (r: any) {
-    if (r.m && r.m.key) unitByKey[r.m.key] = r.unit || 0
+    if (r.m && r.m.key) piUnit[r.m.key] = r.unit || 0
   })
-  // pi wins on key collision: both sides price the same canonical id from the
-  // same models.dev table, so a later zero from the external side must not
-  // overwrite a real unit.
-  if (extUnit) {
-    for (const k of Object.keys(extUnit)) {
-      if (!(k in unitByKey)) unitByKey[k] = extUnit[k] || 0
+  // 两个来源的 token 分开记，再各自乘各自的均价。
+  //
+  // 合并成一个 token 数之后，这个 key 只剩一个 unit 可用，而 unit 是
+  // 「费用 ÷ 自己的 token」，按各自构成加权：同一个 gpt-6.1-sol，pi 侧 $0.575、
+  // 外部侧 $0.177。拿一边去乘合并后的 token，另一半就被错价，本机实测整张榜单
+  // 从 $315.63 虚到 $810.87。均价只在同一份用量内部成立，跨来源不能混用。
+  const agg: Record<string, { token: number; cost: number; piToken: number; extToken: number }> = {}
+  const add = function (rows: any[], isPi: boolean) {
+    for (const x of rows) {
+      if (!x || !x.d || x.d < startKey || x.d > a) continue
+      // 两侧的 key 必须先归一到同一空间才能并成一行：pi 入库时已剥掉 provider
+      // 前缀与 --int 之类的后缀，外部侧带的是原始 id。
+      const key = canonicalModelKey(String(x.key || ''))
+      if (!key || key === '(unknown)') continue
+      let e = agg[key]
+      if (!e) e = agg[key] = { token: 0, cost: 0, piToken: 0, extToken: 0 }
+      const tok = Number(x.total) || 0
+      e.token += tok
+      if (isPi) e.piToken += tok
+      else e.extToken += tok
     }
   }
-  const agg: Record<string, { token: number; cost: number }> = {}
-  for (const x of piRows.concat(extRows)) {
-    if (!x || !x.d || x.d < startKey || x.d > a) continue
-    const key = String(x.key || '')
-    if (!key) continue
-    let e = agg[key]
-    if (!e) e = agg[key] = { token: 0, cost: 0 }
-    const tok = Number(x.total) || 0
-    e.token += tok
-    e.cost += (unitByKey[key] || 0) * tok / 1e6
+  add(piRows, true)
+  add(extRows, false)
+  for (const key of Object.keys(agg)) {
+    const e = agg[key]
+    const u = extUnit || {}
+    e.cost = (piUnit[key] || 0) * e.piToken / 1e6 + (u[key] || 0) * e.extToken / 1e6
   }
   const rows: WeekTopRow[] = Object.keys(agg).map(function (key) {
     return { key, token: agg[key].token, cost: agg[key].cost, share: 0 }

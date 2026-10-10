@@ -6,6 +6,7 @@ import {
   externalSummary, rangeExt,
   rangeStats, filterDaysByRange, rangeCutoffKey, rangeAnchor,
   filterHoursByRange, hourMatrix, rangeInsights, calcStreak, weekTopModels, isoWeekRange,
+  externalUnitByModel, externalRangeByModel,
   type RangeKey
 } from './pricing'
 import { renderOverview, renderModels, renderSessions, renderProjects, renderSettings, budgetAlertHtml, defaultUiState, esc } from './render'
@@ -804,6 +805,65 @@ describe('U6 week top models', () => {
     })
   })
 
+  it('同一模型的两个原始 id 归一后合并成一行，且两半各自计价', () => {
+    // key 空间：pi 侧入库时已归一（gpt-6.1-sol），外部侧带原始 id
+    // （gpt-6.1-sol--int）。不归一就是一个模型两行，而榜单自称按费用降序。
+    const M = 1000000
+    const data: any = {
+      days: [{ d: '2026-10-08', total: 150 * M }],
+      dayModel: [{ d: '2026-10-08', key: 'gpt-6.1-sol', total: 100 * M }],
+      external: {
+        tools: [{
+          tool: 'dsh', label: 'DSH',
+          days: [{ d: '2026-10-08', total: 50 * M }],
+          dayModel: [{ d: '2026-10-08', key: 'gpt-6.1-sol--int', total: 50 * M }],
+          models: [{
+            id: 'gpt-6.1-sol--int', input: 0, cacheRead: 50 * M, cacheWrite: 0, output: 0, total: 50 * M,
+            price: {
+              source: 'models.dev', matchedKey: 'gpt-6.1-sol',
+              cost: { input: 2, output: 10, cache_read: 0.1, cache_write: 2.5 }
+            }
+          }]
+        }]
+      }
+    }
+    const extUnit = externalUnitByModel(data, 'ratio10')
+    // 单价表的键也必须归一，否则外部那半查不到价、整行退化成 $0
+    expect(Object.keys(extUnit)).toEqual(['gpt-6.1-sol'])
+    // 外部全是缓存读，均价 $0.1/1M；pi 侧给的 unit 是 $2/1M
+    near(extUnit['gpt-6.1-sol'], 0.1)
+    const top = weekTopModels(data, { rows: [{ m: { key: 'gpt-6.1-sol' }, unit: 2 }] },
+                              extUnit, '2026-10-08')
+    expect(top.map((r) => r.key)).toEqual(['gpt-6.1-sol'])
+    expect(top[0].token).toBe(150 * M)
+    // 两半各自乘各自的均价：pi 100M × $2 + 外部 50M × $0.1 = $200 + $5。
+    // 合并成一个 token 再乘一边会得到 $300（pi 侧）或 $15（外部侧），都错。
+    near(top[0].cost, 100 * 2 + 50 * 0.1)
+    near(top[0].share, 100)
+  })
+
+  it('kimi/kimi-k3 与 azure-gpt-5.6-sol 这类 provider 前缀同样归一', () => {
+    const data: any = {
+      days: [{ d: '2026-10-08', total: 60 }],
+      dayModel: [
+        { d: '2026-10-08', key: 'kimi-k3', total: 10 },
+        { d: '2026-10-08', key: 'gpt-5.6-sol', total: 10 }
+      ],
+      external: { tools: [{
+        label: 'DSH', days: [{ d: '2026-10-08', total: 40 }],
+        dayModel: [
+          { d: '2026-10-08', key: 'kimi/kimi-k3', total: 20 },
+          { d: '2026-10-08', key: 'azure-gpt-5.6-sol', total: 20 }
+        ],
+        models: []
+      }] }
+    }
+    const top = weekTopModels(data, { rows: [{ m: { key: 'kimi-k3' }, unit: 1 }, { m: { key: 'gpt-5.6-sol' }, unit: 1 }] },
+                              undefined, '2026-10-08')
+    expect(top.map((r) => r.key).sort()).toEqual(['gpt-5.6-sol', 'kimi-k3'])
+    expect(top.every((r) => r.token === 30)).toBe(true)
+  })
+
   itLive('总览冒烟:含 streak KPI 与 本周 Top;空 dayModel 降级;无 NaN', () => {
     const st = defaultUiState()
     const cmp = compareSources(DATA, st)
@@ -905,10 +965,11 @@ describe('external cost by token composition', () => {
     rows.forEach(function (r) { expect(Number.isNaN(r.unit)).toBe(false) })
   })
 
-  itLive('真实数据:模型视图的范围内费用向总览收敛(不再差数倍)', () => {
+  itLive('真实数据:模型视图的范围内费用向总览收敛(两边都是精确值)', () => {
     const st = defaultUiState()
+    const br = externalRangeByModel(DATA, st.policy, '7d', rangeAnchor(DATA))
     const ext = externalSummary(DATA, st.policy)!
-    const re = rangeExt(ext, '7d', rangeAnchor(DATA))
+    const re = rangeExt(ext, '7d', rangeAnchor(DATA), br.byTool)
     const s = computeAll(DATA, st)
     const piCost = rangeStats(DATA, s, dailyCost(DATA, s), '7d').cost
     const html = renderModels(DATA, st, compareSources(DATA, st), '7d')
@@ -917,7 +978,85 @@ describe('external cost by token composition', () => {
     const shown = Number(String(hit![1]).replace(/[$,]/g, ''))
     const overview = re.totalCost + piCost
     expect(overview).toBeGreaterThan(0)
-    expect(Math.abs(shown - overview) / overview).toBeLessThan(0.15)
+    // 两边现在都逐日逐模型计价，差只该来自四舍五入。以前是 15%：模型页偏 +152%、
+    // rangeExt 偏 +46%，方向还相反，所以这个阈值永远不可能通过，它守的其实
+    // 不是它名字声称的东西。
+    expect(Math.abs(shown - overview) / overview).toBeLessThan(0.005)
+  })
+
+  it('同一模型被 pi 与外部同时用到时，两侧各自计价，不按 pi 的单价合并', () => {
+    // 症状：合并 token 之后只留 pi 的 unit，于是外部那一半被按 pi 的构成加权
+    // 单价计费。同一个 gpt-6.1-sol 实测 pi $0.511 / 外部 $0.176，差 2.9 倍，
+    // 模型页因此从 $259 虚报到 $652。
+    const M = 1000000
+    const data: any = {
+      days: [{ d: '2026-10-08', total: 150 * M }],
+      dayModel: [{ d: '2026-10-08', key: 'gpt-6.1-sol', total: 100 * M }],
+      models: [{
+        key: 'gpt-6.1-sol', turns: 1, missingUsage: 0, statuses: {}, firstTs: null, lastTs: null,
+        rawIds: ['gpt-6.1-sol'], rawUsage: [],
+        // pi 侧构成偏输入与输出，外部偏缓存读，两者加权出的 unit 差很多
+        cacheRead: 0, cacheWrite: 0, input: 50 * M, output: 50 * M, reasoning: 0, total: 100 * M
+      }],
+      pricing: {
+        'gpt-6.1-sol': { cost: { input: 2, output: 10, cache_read: 0.1, cache_write: 2.5 } }
+      },
+      external: {
+        tools: [{
+          tool: 'dsh', label: 'DSH',
+          days: [{ d: '2026-10-08', total: 100 * M }],
+          dayModel: [{ d: '2026-10-08', key: 'gpt-6.1-sol--int', total: 100 * M, input: 0, cacheRead: 100 * M, cacheWrite: 0, output: 0, reasoning: 0 }],
+          models: [{ id: 'gpt-6.1-sol--int', total: 100 * M, input: 0, cacheRead: 100 * M, cacheWrite: 0, output: 0, reasoning: 0,
+                     price: { source: 'models.dev', matchedKey: 'gpt-6.1-sol', cost: { input: 2, output: 10, cache_read: 0.1, cache_write: 2.5 } } }]
+        }],
+        prices: {
+          'gpt-6.1-sol--int': { source: 'models.dev', matchedKey: 'gpt-6.1-sol', cost: { input: 2, output: 10, cache_read: 0.1, cache_write: 2.5 } }
+        }
+      }
+    }
+    const st = defaultUiState()
+    const html = renderModels(data, st, {}, '7d')
+    const shown = Number(String(/kpi-v">(\$[\d,.]+)</.exec(html)![1]).replace(/[$,]/g, ''))
+    // pi: 50M 输入 × $2 = $100，50M 输出 × $10 = $500，合计 $600
+    // 外部: 100M 缓存读 × $0.1 = $10
+    // 错价时外部那一半会按 pi 的 unit($6/1M) 算成 $600，整页变 $1200。
+    near(shown, 610)
+  })
+
+  it('externalRangeByModel:有 dayModel 时逐项精确，无则摊算并标 exact=false', () => {
+    const M = 1000000
+    const priced = { input: 2, output: 10, cache_read: 0.1, cache_write: 2.5 }
+    const withDm: any = {
+      days: [{ d: '2026-10-08', total: 100 * M }],
+      external: {
+        tools: [{
+          tool: 'a', label: 'A',
+          days: [{ d: '2026-10-08', total: 100 * M, input: 0, cacheRead: 100 * M, cacheWrite: 0, output: 0 }],
+          dayModel: [{ d: '2026-10-08', key: 'm', total: 100 * M, input: 0, cacheRead: 100 * M, cacheWrite: 0, output: 0, reasoning: 0 }],
+          models: [{ id: 'm', total: 100 * M, input: 0, cacheRead: 100 * M, cacheWrite: 0, output: 0, reasoning: 0,
+                     price: { source: 'models.dev', cost: priced } }]
+        }],
+        prices: { m: { source: 'models.dev', cost: priced } }
+      }
+    }
+    const ok = externalRangeByModel(withDm, 'ratio10', '7d', '2026-10-08')
+    expect(ok.byKey['m'].exact).toBe(true)
+    near(ok.byKey['m'].cost, 10)          // 100M 缓存读 × $0.1
+    near(ok.byTool['a'].cost, 10)
+    near(ok.byDay['2026-10-08'].cost, 10)
+
+    // 没有 dayModel 的工具退回均价摊算，并且必须自己说出口径是摊的
+    const noDm: any = JSON.parse(JSON.stringify(withDm))
+    delete noDm.external.tools[0].dayModel
+    const ap = externalRangeByModel(noDm, 'ratio10', '7d', '2026-10-08')
+    expect(ap.byKey['m'].exact).toBe(false)
+    near(ap.byKey['m'].cost, 10)          // 单模型，退化路径应与精确值一致
+    expect(ap.byTool['a'].exact).toBe(false)
+
+    // dayModel 覆盖不全（有 days 没有对应 dayModel）也必须退回，不能静默少算
+    const partial: any = JSON.parse(JSON.stringify(withDm))
+    partial.external.tools[0].days.push({ d: '2026-10-09', total: 50 * M, input: 0, cacheRead: 50 * M, cacheWrite: 0, output: 0 })
+    expect(externalRangeByModel(partial, 'ratio10', '7d', '2026-10-09').byKey['m'].exact).toBe(false)
   })
 
   it('默认范围是 all:pi 落后于锚点时不整页为空', () => {

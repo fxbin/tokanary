@@ -5,6 +5,8 @@
  * 本模块刻意保持框架无关(Vue 之外也可复用);状态由调用方显式传入(PricingOpts)。 */
 
 import { CAT_COLORS } from './palette'
+import { canonicalModelKey } from './modelkey'
+import { filterDaysByRange, rangeAnchor, type RangeKey } from './range'
 
 export type PriceSource = 'modelsdev'
 export type Policy = 'ratio10' | 'zero' | 'inputprice'
@@ -129,45 +131,8 @@ export function normalizeCustomMap(json: any): Record<string, Cost4> | null {
 
 /* ------------------------------------------------------------ 模型 key 归一 */
 
-/**
- * 前缀表与内部/clisession/session.go 的 prefixes 逐条一致。
- * Go 侧入库时按这套规则写 warehouse 的 model_canon,前端用它把外部工具的
- * 原始 id 对齐到 pi 的 key;两边必须同改,否则同一模型会裂成两行。
- */
-const CANON_PREFIXES = [
-  'azure-', 'openai/', 'kimi/', 'moonshotai/', 'moonshot-', 'x-ai/', 'z-ai/',
-  'google/', 'anthropic/', 'deepseek/', 'qwen/', 'zai-org/', 'minimax/',
-  'xiaomi/', 'stepfun/', 'subconscious/', 'bothub/', 'modelis/', 'greenpt/'
-]
-/* 顺序与 Go 的 ReplaceAllString 调用顺序一致:先 int,再 flag,再日期,再 preview/exp */
-const RE_TRAILING_INT = /--?int$/g
-const RE_TRAILING_FLAG = /--?(ga|preview|exp|latest|beta)[-_]?\d*$/g
-const RE_TRAILING_DATE = /-\d{6}$/g
-const RE_TRAILING_EXP = /-(preview|exp)$/g
-
-/**
- * 模型 id 归一化,镜像 Go 侧 clisession.CanonicalModel / pi_common.canonical_model。
- * pi 的 model_canon 已在入库时归一,这里用它对齐外部工具(Codex/Claude Code 等)
- * 的原始 id,免得同一模型在模型视图里出现多行。
- * 空值按 Go 侧约定返回 '(unknown)';null/undefined 一并视作空。
- */
-export function canonicalModelKey(modelID: string | null | undefined): string {
-  if (modelID === null || modelID === undefined || modelID === '') return '(unknown)'
-  let s = String(modelID).trim().toLowerCase()
-  let changed = true
-  while (changed) {
-    changed = false
-    for (const p of CANON_PREFIXES) {
-      if (s.indexOf(p) === 0) { s = s.slice(p.length); changed = true }
-    }
-  }
-  s = s.replace(RE_TRAILING_INT, '')
-  s = s.replace(RE_TRAILING_FLAG, '')
-  s = s.replace(RE_TRAILING_DATE, '')
-  s = s.replace(RE_TRAILING_EXP, '')
-  if (s === '') return String(modelID).trim().toLowerCase()
-  return s
-}
+// 定义在 modelkey.ts：range.ts 的本周 Top 也要用它，而 range.ts 刻意不依赖计价核心。
+export { canonicalModelKey } from './modelkey'
 
 export interface ResolvedPrice {
   values: Cost4
@@ -317,8 +282,10 @@ export function externalUnitByModel(data: any, policy: Policy): Record<string, n
   const ext = externalSummary(data, policy)
   for (const r of ((ext as any)?.rows || []) as any[]) {
     for (const m of r.models || []) {
-      const id = String(m.id || '')
-      if (id && !(id in out)) out[id] = m.unit || 0
+      // 归一化后才能和 pi 侧撞上：外部的原始 id 带 --int / azure- / provider 前缀，
+      // pi 侧入库时已经剥掉了。两侧不同键，同一模型就是两行，费用各算一半。
+      const id = canonicalModelKey(String(m.id || ''))
+      if (id && id !== '(unknown)' && !(id in out)) out[id] = m.unit || 0
     }
   }
   return out
@@ -371,6 +338,153 @@ export function dailyCost(data: any, summary: { rows: any[] }) {
     byDay[dm.d] = (byDay[dm.d] || 0) + v
   })
   return byDay
+}
+
+/* ------------------------------------------------------------ 区间费用 */
+
+/** 一个模型 key 在区间内的外部侧 token 与费用。 */
+export interface ExtRangeCell {
+  tokens: number
+  cost: number
+  /** false 表示该工具没有逐日逐模型明细，数字是按全量构成摊出来的。 */
+  exact: boolean
+}
+
+export interface ExtRangeBreakdown {
+  byKey: Record<string, ExtRangeCell>
+  byTool: Record<string, { tokens: number; cost: number; exact: boolean }>
+  byDay: Record<string, { tokens: number; cost: number; exact: boolean }>
+}
+
+/**
+ * 区间内外部工具的 token 与费用。给出两份口径，因为两份的消费者不同：
+ *
+ *   - `byKey` 给模型视图。模型视图按 key 汇总，pi 与外部会在同一个 key 上相遇。
+ *   - `byTool` 给 rangeExt。每个工具报自己那一行，跨工具的费用不能按 key 查：
+ *     key 是全局的，拿它去算单个工具会把别的工具的钱算进来。
+ *   - `byDay` 给总览的主图与「近 N 天费用」。主图要的是逐日序列，而逐日逐模型
+ *     恰好就是逐日的精确来源。
+ *
+ * 有逐日逐模型明细的工具（`external.tools[].dayModel`）逐项计价，这是精确值。
+ * 没有明细的（sqlite 适配器与走 driver 的 codex）退回按全量模型占比摊算，并标
+ * exact=false，让调用方能说清这条数字的来历。
+ *
+ * 这里刻意不用「每工具综合均价 × 区间 token」：均价是按该工具**全量**构成加权的，
+ * 区间内的构成一变就偏。本机实测同一区间偏 46%，而 day×model 的数据早就在
+ * payload 里了。
+ */
+export function externalRangeByModel(
+  data: any, policy: Policy, range: RangeKey, anchor?: string | null
+): ExtRangeBreakdown {
+  const byKey: Record<string, ExtRangeCell> = {}
+  const byTool: Record<string, { tokens: number; cost: number; exact: boolean }> = {}
+  const byDay: Record<string, { tokens: number; cost: number; exact: boolean }> = {}
+  const dayCell = function (d: string) {
+    return byDay[d] || (byDay[d] = { tokens: 0, cost: 0, exact: true })
+  }
+  const bump = function (key: string, tokens: number, cost: number, exact: boolean) {
+    if (!key || key === '(unknown)' || tokens <= 0) return
+    let e = byKey[key]
+    if (!e) e = byKey[key] = { tokens: 0, cost: 0, exact: true }
+    e.tokens += tokens
+    e.cost += cost
+    if (!exact) e.exact = false
+  }
+  const a = anchor || rangeAnchor(data)
+  const ext = data && data.external
+  const prices = (ext && ext.prices) || {}
+  const inRange = function (d: any) {
+    return filterDaysByRange([{ d: String(d || ''), total: 1 }], range, a).length > 0
+  }
+
+  for (const t of ((ext && ext.tools) || []) as any[]) {
+    const toolId = String((t && (t.tool || t.label)) || '')
+    const tool = byTool[toolId] || (byTool[toolId] = { tokens: 0, cost: 0, exact: true })
+    const rows = (t && t.dayModel) || []
+    // 只有当 dayModel 覆盖了这个工具的每一个有用量日，才敢当成精确值；缺一天
+    // 就整体退回摊算，否则会静默少算那一天。
+    let usable = rows.length > 0
+    if (usable) {
+      const covered = new Set<string>()
+      for (const r of rows) if (r && r.d) covered.add(String(r.d))
+      for (const d of (t.days || [])) {
+        if (d && d.d && !covered.has(String(d.d))) { usable = false; break }
+      }
+    }
+
+    if (usable) {
+      for (const r of rows) {
+        if (!r || !inRange(r.d)) continue
+        const tokens = numOrNull(r.total) ||
+          (numOrNull(r.cacheRead) || 0) + (numOrNull(r.cacheWrite) || 0) +
+          (numOrNull(r.input) || 0) + (numOrNull(r.output) || 0)
+        if (tokens <= 0) continue
+        const key = canonicalModelKey(String(r.key || ''))
+        const n = normalizeCost((prices[r.key] && prices[r.key].cost) || {}, policy)
+        const c = n.ok ? costOfTokens(r, n.values) : 0
+        bump(key, tokens, c, true)
+        tool.tokens += tokens
+        tool.cost += c
+        const dc = dayCell(String(r.d))
+        dc.tokens += tokens
+        dc.cost += c
+      }
+      continue
+    }
+
+    /* 退化路径：保留工具级总额不变（与 rangeExt 同口径），只把分配从「按 token
+     * 占比」换成「按费用占比」。同一个模型在区间内花的比例本来就跟着钱走，
+     * 而不跟着 token 走。 */
+    const tdays = filterDaysByRange(t.days || [], range, a)
+    let rangeTok = 0
+    for (const d of tdays) {
+      rangeTok += numOrNull(d.total) ||
+        (numOrNull(d.cacheRead) || 0) + (numOrNull(d.cacheWrite) || 0) +
+        (numOrNull(d.input) || 0) + (numOrNull(d.output) || 0)
+    }
+    if (rangeTok <= 0) continue
+    tool.exact = false
+    // payload 里 tools[].models 是行数组（ExtModelRow），不是 external-usage.json
+    // 那个以 id 为键的对象。按对象处理会读到下标 "0"，单价与 key 全部落空，
+    // 于是退���路径静默产出 0。
+    const rowsOf = t.models || []
+    const models: Array<{ id: string; m: any }> = Array.isArray(rowsOf)
+      ? rowsOf.map(function (m: any) { return { id: String((m && m.id) || ''), m: m } })
+      : Object.keys(rowsOf).map(function (id: string) { return { id: id, m: rowsOf[id] } })
+    let allTok = 0, allCost = 0
+    const per: Array<[string, number, number]> = []
+    for (const { id, m } of models) {
+      const tok = (numOrNull(m.input) || 0) + (numOrNull(m.cacheRead) || 0) +
+        (numOrNull(m.cacheWrite) || 0) + (numOrNull(m.output) || 0)
+      const n = normalizeCost((prices[id] && prices[id].cost) || {}, policy)
+      const cost = n.ok ? costOfTokens(m, n.values) : 0
+      allTok += tok
+      allCost += cost
+      per.push([canonicalModelKey(id), tok, cost])
+    }
+    // 工具级均价与旧口径同式：全量费用 ÷ 全量 token。退化路径保留均价口径，
+    // 是为了不改变那些拿不到 dayModel 的工具今天的数字。
+    const toolUnit = allTok > 0 ? allCost / allTok : 0
+    const toolCost = toolUnit * rangeTok
+    tool.tokens += rangeTok
+    tool.cost += toolCost
+    for (const [key, tok, cost] of per) {
+      const share = allCost > 0 ? cost / allCost : (allTok > 0 ? tok / allTok : 0)
+      bump(key, Math.round(rangeTok * (allTok > 0 ? tok / allTok : 0)), toolCost * share, false)
+    }
+    // 逐日同样按均价摊，并标 exact=false，让总览知道自己这条线是摊出来的。
+    for (const d of tdays) {
+      const tok = numOrNull(d.total) ||
+        (numOrNull(d.cacheRead) || 0) + (numOrNull(d.cacheWrite) || 0) +
+        (numOrNull(d.input) || 0) + (numOrNull(d.output) || 0)
+      if (tok <= 0) continue
+      const dc = dayCell(String(d.d))
+      dc.exact = false
+      dc.tokens += tok
+      dc.cost += toolUnit * tok
+    }
+  }
+  return { byKey, byTool, byDay }
 }
 
 /* ------------------------------------------------------------ 时间范围 */
