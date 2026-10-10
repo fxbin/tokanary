@@ -153,19 +153,39 @@ func runCollect(args []string) int {
 	}
 	nextState := collectState{Tools: map[string]toolFingerprint{}}
 
-	rows := make([]pricing.ToolUsage, 0, len(enabled))
+	// Each source file belongs to exactly one adapter. Two manifests may
+	// declare overlapping paths and on this machine they do: deepseek-harness
+	// declares %DSH_HOME%, and DSH Desktop points that variable at its own
+	// harness dir, so the "official" adapter matched all 286 wrapper files and
+	// billed every one of them twice. Assignment happens before the loop so the
+	// decision sees every adapter at once.
+	claimCtx := &sources.Context{Home: o.home, WorkDir: o.workDir}
+	valid := make([]*sources.Manifest, 0, len(enabled))
 	for _, m := range enabled {
 		if errs := sources.Validate(m); len(errs) > 0 {
 			fmt.Printf("[!!] %s: 适配器定义有问题，跳过 —— %v\n", m.ID, errs)
 			continue
 		}
+		valid = append(valid, m)
+	}
+	claims := sources.AssignFiles(valid, claimCtx)
+	claimByID := map[string]sources.FileClaim{}
+	for _, c := range claims {
+		claimByID[c.Manifest.ID] = c
+	}
+	for _, line := range sources.OverlapLines(claims) {
+		fmt.Println(line)
+	}
+
+	rows := make([]pricing.ToolUsage, 0, len(enabled))
+	for _, m := range valid {
 		ctx := &sources.Context{
 			Home:      o.home,
 			WorkDir:   o.workDir,
 			Prefilter: m.PrefilterPatterns(),
 			ForceFull: o.full,
 		}
-		files := sources.FilesFor(m, ctx)
+		files := claimByID[m.ID].Files
 		fp := fingerprintFiles(files)
 		nextState.Tools[m.ID] = fp
 
