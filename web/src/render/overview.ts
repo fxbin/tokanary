@@ -4,7 +4,7 @@ import {
   dailyCost, externalSummary, rangeStats, rangeExt, rangeAnchor, withMergedDays, mergeDailyCost,
   filterHoursByRange, hourMatrix, rangeInsights, RANGES, mergeAllHours, hourToolCount,
   filterDaysByRange, rangeCutoffKey, calcStreak, weekTopModels, isoWeekRange, mergeDailyUsage,
-  externalUnitByModel,
+  externalUnitByModel, externalRangeByModel,
   type PricingOpts, type PriceSource, type RangeKey
 } from '../pricing'
 import { MODEL_COLORS, stackBar, donut, legend, dayChart, heatmap, trimNum } from '../charts'
@@ -24,10 +24,12 @@ export function renderOverview(data: any, st: UiState, cmp: Record<string, numbe
   // pi 侧逐日费用（只喂 data.dayModel，即纯 pi）；合并后才是「全工具」。
   // 两个口径必须分开取：rs.cost 已经是全工具合计，再叠一次外部费用就是同一笔钱加自己。
   const piCostByDay = dailyCost(data, s)
-  const costByDay = mergeDailyCost(piCostByDay, ext, data)
+  // 外部侧一次性算清，模型视图与本页共用同一份，避免同一笔钱在两处各算一次。
+  const extRange = externalRangeByModel(data, st.policy, range, rangeAnchor(data))
+  const costByDay = mergeDailyCost(piCostByDay, ext, data, extRange.byDay)
   const rs = rangeStats(merged, s, costByDay, range)
   const piRs = rangeStats(data, s, piCostByDay, range)
-  const re = rangeExt(ext, range, rangeAnchor(data))
+  const re = rangeExt(ext, range, rangeAnchor(data), extRange.byTool)
   const html: string[] = []
   const rangeLabel = (RANGES[range] || RANGES.all).label
   const anchor = rangeAnchor(data)

@@ -2,6 +2,7 @@ import {
   fmt, money, pct, esc, CATS, POLICIES, SOURCES,
   normalizeCost, costOfTokens, computeAll, compareSources, canonicalModelKey,
   dailyCost, externalSummary, rangeStats, rangeExt, rangeAnchor,
+  externalRangeByModel, type ExtRangeCell,
   filterHoursByRange, hourMatrix, rangeInsights, RANGES,
   filterDaysByRange, rangeCutoffKey, calcStreak, weekTopModels,
   type PricingOpts, type PriceSource, type Policy, type RangeKey
@@ -10,64 +11,69 @@ import { MODEL_COLORS, stackBar, donut, legend, dayChart, trimNum } from '../cha
 import { th, sourceTag, stableColorIndex, sesRecency, pad2, localDay, emptyStateHtml, type UiState } from './shared'
 
 /**
- * 范围内按 model key 聚合：pi 的 dayModel 精确 + external 各工具按
- * 「工具日合计 × 该模型占比」近似（external 无 per-model day 明细）。
+ * 范围内按 model key 聚合：pi 的 dayModel 精确 + external 按逐日逐模型精确。
+ *
+ * 两边分开累计是有原因的，不是洁癖。合并成一个 token 数之后，那个 key 只剩一个
+ * 单价可用，而 unit 是「费用 ÷ token」，按各自的 token 构成加权：同一个
+ * gpt-6.1-sol，pi 侧 $0.511、外部侧 $0.176，差 2.9 倍。拿其中一边去乘合并后的
+ * token，另一半就被错价。实测这一处让模型页从 $259 虚报到 $652。
+ *
+ * 所以这里返回 pi / ext 两个分量，费用由各自的分量与各自的单价相乘得到。
  */
-function rangeModelAgg(data: any, range: RangeKey): Record<string, { total: number; fields: any }> {
+function rangeModelAgg(data: any, range: RangeKey, ext: Record<string, ExtRangeCell>): Record<string, { total: number; piTotal: number; extTotal: number; fields: any }> {
   const anchor = rangeAnchor(data)
   const fdays = filterDaysByRange(data.days || [], range, anchor)
   const allow: Record<string, true> = {}
   fdays.forEach(function (d) { allow[d.d] = true })
-  const out: Record<string, { total: number; fields: any }> = {}
+  const out: Record<string, { total: number; piTotal: number; extTotal: number; fields: any }> = {}
+  const slot = function (key: string) {
+    let e = out[key]
+    if (!e) {
+      e = out[key] = { total: 0, piTotal: 0, extTotal: 0, fields: { cacheRead: 0, cacheWrite: 0, input: 0, output: 0 } }
+    }
+    return e
+  }
   ;(data.dayModel || []).forEach(function (dm: any) {
     if (!allow[dm.d]) return
-    let e = out[dm.key]
-    if (!e) {
-      e = out[dm.key] = { total: 0, fields: { cacheRead: 0, cacheWrite: 0, input: 0, output: 0 } }
-    }
-    e.total += dm.total || 0
+    const e = slot(dm.key)
+    const t = dm.total || 0
+    e.total += t
+    e.piTotal += t
   })
-  // fields 无 dayModel 拆分:按全量模型比例近似回填(只用于堆叠条;token 总数仍精确)
+  // pi 的四段拆分按各模型全量构成回填：dayModel 只带 token 合计，而堆叠条与
+  // 表格要的是构成。总量不受影响，所以这仍是精确的。
   ;(data.models || []).forEach(function (m: any) {
     const e = out[m.key]
-    if (!e || !m.total) return
-    const scale = e.total / m.total
+    if (!e || !m.total || !e.piTotal) return
+    const scale = e.piTotal / m.total
     e.fields.cacheRead = Math.round((m.cacheRead || 0) * scale)
     e.fields.cacheWrite = Math.round((m.cacheWrite || 0) * scale)
     e.fields.input = Math.round((m.input || 0) * scale)
     e.fields.output = Math.round((m.output || 0) * scale)
   })
-  // external: 无 per-model 日拆，按工具范围 token × 模型占比近似
+  // external：逐日逐模型桶本身就是精确的 token 与构成，不需要任何摊算。
   for (const t of data?.external?.tools || []) {
-    const tdays = filterDaysByRange(t.days || [], range, anchor)
-    let rangeTok = 0
-    for (const d of tdays) {
-      rangeTok += Number(d.total || 0) ||
-        Number(d.input || 0) + Number(d.output || 0) + Number(d.cacheRead || 0) + Number(d.cacheWrite || 0)
-    }
-    if (rangeTok <= 0) continue
-    const models = t.models || []
-    let allTok = 0
-    for (const m of models) allTok += Number(m.total || 0)
-    if (allTok <= 0) continue
-    for (const m of models) {
-      const share = Number(m.total || 0) / allTok
-      const tok = Math.round(rangeTok * share)
-      if (tok <= 0) continue
-      // key 与 externalModelRows / piRows 用同一套归一化,否则 donut 取不到范围内 token
-      const key = canonicalModelKey(String(m.id))
-      let e = out[key]
-      if (!e) {
-        e = out[key] = { total: 0, fields: { cacheRead: 0, cacheWrite: 0, input: 0, output: 0 } }
+    for (const d of t.days || []) {
+      if (!d || !d.d || !allow[d.d]) continue
+      for (const row of (t.dayModel || []) as any[]) {
+        if (String((row && row.d)) !== String(d.d)) continue
+        const key = canonicalModelKey(String((row && row.key) || ''))
+        if (!key || key === '(unknown)') continue
+        const tok = Number(row.total || 0) ||
+          Number(row.input || 0) + Number(row.output || 0) +
+          Number(row.cacheRead || 0) + Number(row.cacheWrite || 0)
+        if (tok <= 0) continue
+        const e = slot(key)
+        e.total += tok
+        e.extTotal += tok
+        e.fields.cacheRead += Number(row.cacheRead || 0)
+        e.fields.cacheWrite += Number(row.cacheWrite || 0)
+        e.fields.input += Number(row.input || 0)
+        e.fields.output += Number(row.output || 0)
       }
-      const scale = Number(m.total || 0) ? share : 1
-      e.total += tok
-      e.fields.cacheRead += Math.round(Number(m.cacheRead || 0) * scale * (rangeTok / allTok))
-      e.fields.cacheWrite += Math.round(Number(m.cacheWrite || 0) * scale * (rangeTok / allTok))
-      e.fields.input += Math.round(Number(m.input || 0) * scale * (rangeTok / allTok))
-      e.fields.output += Math.round(Number(m.output || 0) * scale * (rangeTok / allTok))
     }
   }
+  void ext
   return out
 }
 
@@ -140,7 +146,10 @@ export function renderModels(data: any, st: UiState, cmp: Record<string, number>
   const costByDay = dailyCost(data, s)
   const rs = rangeStats(data, s, costByDay, range)
   const rangeLabel = (RANGES[range] || RANGES.all).label
-  const agg = rangeModelAgg(data, range)
+  const anchor = rangeAnchor(data)
+  // 外部侧区间费用：逐日逐模型逐项计价，与 rangeExt 共用同一份计算。
+  const extCells = externalRangeByModel(data, st.policy, range, anchor).byKey
+  const agg = rangeModelAgg(data, range, extCells)
 
   // 合并 pi + external 模型宇宙（external 可能有 pi 没有的 key）
   type MRow = { key: string; total: number; turns: number; cacheRead: number; cacheWrite: number; input: number; output: number; unit: number; source: string }
@@ -183,12 +192,14 @@ export function renderModels(data: any, st: UiState, cmp: Record<string, number>
   }).filter(function (x: any) { return x.total > 0 })
   stackRows.sort(function (a: any, b: any) { return b.total - a.total })
 
-  /* donut:范围内 token × 综合均价 */
+  /* donut:区间内 token × 各自那一侧的均价。
+     pi 的那一半乘 pi 的 unit，外部的那一半乘外部该模型的 unit。合成一个 token
+     再乘单价会把其中一半错价，实测同一个 gpt-6.1-sol 两侧单价差 2.9 倍。 */
   const costItems = piRows.map(function (m: MRow) {
     const a = agg[m.key]
-    const tokens = a ? a.total : 0
-    const cost = m.unit * tokens / 1e6
-    return { label: m.key, value: cost, color: colorOf(m.key) }
+    const piCost = (m.unit || 0) * (a ? a.piTotal : 0) / 1e6
+    const extCost = extCells[m.key] ? extCells[m.key].cost : 0
+    return { label: m.key, value: piCost + extCost, color: colorOf(m.key) }
   }).filter(function (x: any) { return x.value > 0 })
   costItems.sort(function (a: any, b: any) { return b.value - a.value })
 
