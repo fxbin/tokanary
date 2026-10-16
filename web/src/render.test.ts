@@ -8,7 +8,7 @@ import {
 } from './pricing'
 import {
   renderOverview, renderProjects, renderSessions, renderSettings, renderModels,
-  defaultUiState, esc, type UiState
+  defaultUiState, esc, yieldRows, type UiState
 } from './render'
 import { hasAnyPricing, loadDashboardFixture } from './testsupport'
 import { windowUsage, USAGE_WINDOWS } from './usage'
@@ -433,6 +433,47 @@ suite('产出 · git：已从总览下沉到项目视图', () => {
     const html = projectsHtml(null)
     expect(html).toContain('<details class="yield-zero">')
     expect(html).toContain('没有提交')
+  })
+})
+
+/* ------------------------------------------------- 一行是仓库，别名是目录项目 */
+
+suite('产出 · git：仓库内子目录项目按别名归因', () => {
+  /* 仓库 root 与它内部的子目录是同一个仓库：Go 侧只出一行，子目录的
+     项目名进 alsoProjects。费用按别名对上，而不是因为名字不同就丢。
+     夹具一律用合成名字，不塞本机真实项目与提交。 */
+  const PAYLOAD = {
+    yield: [{
+      project: 'demo',
+      root: '/work/demo',
+      alsoProjects: ['demo-web'],
+      total: 12,
+      days: [{ d: '2026-01-02', count: 2, subjects: ['add widget'] }]
+    }]
+  }
+
+  it('只有别名有费用时，别名就是归因对象', () => {
+    const rows = yieldRows(PAYLOAD, { 'demo-web': true })
+    expect(rows.length).toBe(1)
+    expect(rows[0].attributedTo).toBe('demo-web')
+    expect(rows[0].also).toEqual(['demo-web'])
+  })
+
+  it('主名与别名都有费用时，主名优先，归因不跳来跳去', () => {
+    const rows = yieldRows(PAYLOAD, { demo: true, 'demo-web': true })
+    expect(rows[0].attributedTo).toBe('demo')
+  })
+
+  it('谁都没有费用时是未归因的 null，不是 undefined', () => {
+    const rows = yieldRows(PAYLOAD, { SomewhereElse: true })
+    expect(rows[0].attributedTo).toBe(null)
+  })
+
+  it('没有 alsoProjects 的旧行仍然可用', () => {
+    const rows = yieldRows({ yield: [{ project: 'demo', root: 'D:/demo', total: 3, days: [] }] },
+      { demo: true })
+    expect(rows[0].also).toEqual([])
+    expect(rows[0].attributedTo).toBe('demo')
   })
 })
 

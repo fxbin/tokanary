@@ -5,6 +5,7 @@ package yield
 import (
 	"database/sql"
 	"os/exec"
+	"sort"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -21,30 +22,89 @@ type DayCommits struct {
 
 // WorkspaceYield is per-repo commit activity.
 type WorkspaceYield struct {
-	Project string       `json:"project"`
-	Root    string       `json:"root"`
-	Days    []DayCommits `json:"days"`
-	Total   int          `json:"total"`
+	Project string `json:"project"`
+	Root    string `json:"root"`
+	// AlsoProjects are the other project names that resolve to this same
+	// repository. They ride along so a project's own cost can still join this
+	// repo's commits when pi recorded it under a second name for the same path.
+	AlsoProjects []string     `json:"alsoProjects,omitempty"`
+	Days         []DayCommits `json:"days"`
+	Total        int          `json:"total"`
 }
 
-// ProjectGit scans git log for each workspace path and returns commits per day.
+// ProjectGit scans git log for each workspace path and returns one row per
+// repository.
+//
+// One row per repository, not per path, and the path is resolved to the
+// repository that owns it. A directory inside someone else's work tree has no
+// commits of its own and git answers for it with the enclosing history, so
+// taking a repo and a directory inside it used to count that repo twice and put
+// two identical rows in the panel - two projects, one commit count, one last
+// subject. A nested repository of its own still gets its own row, because
+// asking git where the commits live is what decides it, not a .git probe.
+//
+// A project whose working directory is inside a repository does not vanish: it
+// joins that repository's row as an alias, so its spend still has commits to be
+// measured against instead of falling into "no commits to attribute". Names are
+// sorted before grouping, so the primary name does not depend on map order.
 func ProjectGit(projects map[string]string) []WorkspaceYield {
-	var out []WorkspaceYield
-	for name, root := range projects {
+	names := make([]string, 0, len(projects))
+	for name := range projects {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
+	type row struct {
+		ws   WorkspaceYield
+		also []string
+	}
+	byRoot := map[string]*row{}
+	var order []string
+	for _, name := range names {
+		root := projects[name]
 		if root == "" {
 			continue
 		}
-		if !isGitRepo(root) {
+		top, ok := repoRoot(root)
+		if !ok {
 			continue
 		}
-		days := gitCommitsByDay(root, 60)
+		if r, seen := byRoot[top]; seen {
+			r.also = append(r.also, name)
+			continue
+		}
+		days := gitCommitsByDay(top, 60)
 		total := 0
 		for _, d := range days {
 			total += d.Count
 		}
-		out = append(out, WorkspaceYield{Project: name, Root: root, Days: days, Total: total})
+		byRoot[top] = &row{ws: WorkspaceYield{Project: name, Root: top, Days: days, Total: total}}
+		order = append(order, top)
+	}
+	out := make([]WorkspaceYield, 0, len(order))
+	for _, top := range order {
+		r := byRoot[top]
+		r.ws.AlsoProjects = r.also
+		out = append(out, r.ws)
 	}
 	return out
+}
+
+// repoRoot reports the repository a directory belongs to, by asking git rather
+// than by looking for a .git directory. A directory inside a work tree resolves
+// upward to that repository, which is the point: the subdirectory has no
+// commits of its own, and the enclosing repository is the thing that shipped
+// them.
+func repoRoot(dir string) (string, bool) {
+	b, err := exec.Command("git", "-C", dir, "rev-parse", "--show-toplevel").Output()
+	if err != nil {
+		return "", false
+	}
+	top := strings.TrimSpace(string(b))
+	if top == "" {
+		return "", false
+	}
+	return top, true
 }
 
 func isGitRepo(dir string) bool {

@@ -52,9 +52,11 @@ export function budgetAlertHtml(cost: number, budgetUsd: number, scopeLabel: str
 /**
  * git 产出与用量归因。
  *
- * data.yield 的项目名来自 git root 扫描（仓库目录 basename），用量侧的
- * sessions.project_id 是会话自己带的项目名 —— 两边没有 join key。所以：
- *  - 同名对上 → 才给费用与「每次提交成本」；
+ * data.yield 一行是一个仓库，不是路径：Go 侧把每个项目的工作目录交给 git 问
+ * 「这些提交属于哪个仓库」，同一仓库只出一行，其余名字进 alsoProjects。
+ * 用量侧的 sessions.project_id 是会话自带的项目名，所以归因键是
+ * 「仓库名或它的任一别名」，而不是同名比对。
+ *  - 对上 → 才给费用与「每次提交成本」；
  *  - 对不上 → 标「未归因」，绝不显示 0 冒充。
  */
 export interface YieldRow {
@@ -63,7 +65,9 @@ export interface YieldRow {
   total: number
   lastDay: string | null
   lastSubject: string | null
-  /** 与之同名、且在当前项目视图里有费用的项目名；对不上为 null */
+  /** 解析到同一仓库的其他项目名（含仓库内子目录），对不上为 null */
+  also: string[]
+  /** 与之同名或别名的、且在当前项目视图里有费用的项目名；对不上为 null */
   attributedTo: string | null
 }
 
@@ -74,13 +78,18 @@ export function yieldRows(data: any, projectNames: Record<string, true>): YieldR
     const days = (y.days || []).slice().sort(function (a: any, b: any) { return a.d < b.d ? 1 : -1 })
     const last = days[0]
     const name = String(y.project || '')
+    const also = Array.isArray(y.alsoProjects) ? y.alsoProjects.map(function (n: any) { return String(n) }) : []
+    const keys = [name].concat(also)
+    let attributedTo: string | null = null
+    keys.forEach(function (k: string) { if (!attributedTo && projectNames[k]) attributedTo = k })
     return {
       name,
       root: String(y.root || ''),
       total: Number(y.total || 0),
       lastDay: last ? String(last.d) : null,
       lastSubject: last && last.subjects && last.subjects[0] ? String(last.subjects[0]) : null,
-      attributedTo: projectNames[name] ? name : null
+      also,
+      attributedTo
     }
   })
 }
@@ -241,8 +250,9 @@ export function renderProjects(data: any, st: UiState, cmp: Record<string, numbe
     html.push('<section class="card">')
     html.push('<h2>产出 · git <span class="hint">本地仓库 commit · ' +
       allYield.length + ' 个仓库共 ' + fmt(commitTotal) + ' 次提交</span></h2>')
-    html.push('<div class="note-inline dim small">归因规则：git 表的项目名来自仓库目录名（<code>y.root</code>），' +
-      '用量来自 <code>sessions.project_id</code>，两边没有 join key —— 只有<strong>同名</strong>才对得上费用。' +
+    html.push('<div class="note-inline dim small">归因规则：一行是一个<strong>仓库</strong>，不是路径 —— 每个项目的工作目录都交给 git 问一遍「这些提交属于哪个仓库」，' +
+      '同一仓库只出一行，仓库内的子目录项目记为它的别名。用量来自 <code>sessions.project_id</code>，' +
+      '仓库名或别名<strong>对得上</strong>才配费用与「每次提交成本」。' +
       '对不上的一律记「未归因」，不按 0 元计，也不摊「每次提交成本」。' +
       '点上面任一项目进钻取，可看该项目对上的仓库与每次提交成本。</div>')
     html.push('<div class="tbl-wrap"><table class="tbl"><thead><tr>' +
@@ -250,7 +260,8 @@ export function renderProjects(data: any, st: UiState, cmp: Record<string, numbe
       '</tr></thead><tbody>')
     withCommits.slice().sort(function (a: any, b: any) { return b.total - a.total }).forEach(function (y: YieldRow) {
       html.push('<tr' + (y.attributedTo ? ' data-proj="' + esc(y.attributedTo) + '"' : '') + '>' +
-        '<td class="mname"><b>' + esc(y.name) + '</b><div class="raw">' + esc(y.root) + '</div></td>' +
+        '<td class="mname"><b>' + esc(y.name) + '</b><div class="raw">' + esc(y.root) + '</div>' +
+        (y.also.length ? '<div class="dim small">别名 ' + y.also.map(function (n: string) { return esc(n) }).join('、') + '</div>' : '') + '</td>' +
         '<td class="num strong">' + fmt(y.total) + '</td>' +
         '<td>' + (y.attributedTo
           ? '<span class="tag tag-ok">对上 ' + esc(y.attributedTo) + '</span>'
@@ -258,7 +269,7 @@ export function renderProjects(data: any, st: UiState, cmp: Record<string, numbe
         '<td class="num">' + esc((y.lastDay || '—') + (y.lastSubject ? ' · ' + y.lastSubject : '')) + '</td></tr>')
     })
     html.push('</tbody></table></div>')
-    html.push('<div class="note-inline dim small">其中 ' + attributed.length + ' 个仓库与项目同名（可归因），' +
+    html.push('<div class="note-inline dim small">其中 ' + attributed.length + ' 个仓库能与项目名对上（可归因），' +
       unattributed.length + ' 个未归因（无 join key，不摊成本）。</div>')
     if (noCommits.length) {
       html.push('<details class="yield-zero"><summary>' + noCommits.length +
@@ -366,9 +377,11 @@ export function renderProjects(data: any, st: UiState, cmp: Record<string, numbe
 
     /* 产出 · git（从总览下沉到这里：它得挂在「项目」语境下才谈得上成本） */
     {
-      const ys = yieldRows(data, projNames).filter(function (y: YieldRow) { return y.name === pname })
+      const ys = yieldRows(data, projNames).filter(function (y: YieldRow) {
+        return y.name === pname || y.also.indexOf(pname) >= 0
+      })
       html.push('<section class="card">')
-      html.push('<h2>该项目产出 · git <span class="hint">本地仓库 commit · 归因按仓库名与项目名同名匹配</span></h2>')
+      html.push('<h2>该项目产出 · git <span class="hint">本地仓库 commit · 归因按仓库名或其别名匹配</span></h2>')
       if (!ys.length) {
         html.push('<div class="empty">没有扫到与「' + esc(pname) + '」同名的 git 仓库 —— ' +
           '该项目的用量有 ' + money(pCost) + ' 费用但无提交可归因（未归因），' +
@@ -390,7 +403,7 @@ export function renderProjects(data: any, st: UiState, cmp: Record<string, numbe
         html.push('</tbody></table></div>')
         html.push('<div class="note-inline dim small">' + (ysCommits > 0
           ? '「每次提交成本」= ' + esc(pname) + ' 在' + esc(rangeLabel) + '的费用 ' + money(pCost) +
-            ' ÷ 该仓库 ' + ysCommits + ' 次提交。仓库名与项目名同名才归因，对不上一律标未归因，不按 0 计。'
+            ' ÷ 该仓库 ' + ysCommits + ' 次提交。仓库名或别名对得上才归因，对不上一律标未归因，不按 0 计。'
           : esc(pname) + ' 在' + esc(rangeLabel) + '有 ' + money(pCost) + ' 费用，但同名仓库扫不到任何提交 —— ' +
             '这是「有费用、无提交」，不是 0 成本。') + '</div>')
       }

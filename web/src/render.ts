@@ -11,7 +11,7 @@ export { defaultUiState, esc } from './render/shared'
 export { renderOverview } from './render/overview'
 export { renderModels } from './render/models'
 export { renderSessions } from './render/sessions'
-export { budgetAlertHtml, BUDGET_SCOPE_LABEL, BUDGET_TIERS, renderProjects } from './render/projects'
+export { budgetAlertHtml, BUDGET_SCOPE_LABEL, BUDGET_TIERS, renderProjects, yieldRows, type YieldRow } from './render/projects'
 export { renderSettings, priceAgeDays } from './render/settings'
 // 测试与审计脚本要用的纯函数/口径常量。不给它们建 re-export 的话，检查脚本
 // 就得从 render/ 下深层路径导入，等于把内部结构写进测试 —— 那比死 import 更脆。
