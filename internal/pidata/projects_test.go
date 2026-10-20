@@ -74,7 +74,7 @@ func TestReadKeepsProjectPaths(t *testing.T) {
 	}
 	want := map[string]string{
 		"alpha": filepath.Join("D:", "work", "alpha"),
-		"beta":    filepath.Join("D:", "work", "beta"),
+		"beta":  filepath.Join("D:", "work", "beta"),
 	}
 	for _, p := range d.Projects {
 		if p.Path != want[p.Name] {
